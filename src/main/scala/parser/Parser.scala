@@ -213,6 +213,33 @@ class Parser(source: String):
       }
     }
 
+  def makePiIntro(args: List[String], body: Expr): Expr =
+    @annotation.tailrec def recur(xs: List[String], acc: Expr): Expr =
+      xs match
+        case Nil => acc
+        case x :: xs => recur(xs, PiIntro(x, acc))
+    recur(args.reverse, body)
+
+  def parseDefDef: ParseResult[DefDef] =
+    matchAhead(Def()) flatMap { _ =>
+      parseIdentifier flatMap { case Token(_, defname) =>
+        step()
+        parseFormalListOptional flatMap { formals =>
+          matchAhead(Colon()) flatMap { _ =>
+            parseExpr flatMap { resTyp =>
+              val sig = makePiType(formals, resTyp)
+              matchAhead(Equal()) flatMap { _ =>
+                parseExpr map { body =>
+                  val term = makePiIntro(formals.map(_._1), body)
+                  DefDef(defname, sig, term)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
 object Parser:
   type ParseResult[+X] = Either[String, X]
 
@@ -223,3 +250,7 @@ object Parser:
   def parseDataDef(source: String): ParseResult[DataDef] =
     val parser = new Parser(source)
     parser.parseDataDef
+
+  def parseDefDef(source: String): ParseResult[DefDef] =
+    val parser = new Parser(source)
+    parser.parseDefDef

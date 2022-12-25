@@ -119,24 +119,53 @@ enum Eq(A: Set, a: A, b: A) extends Type:
 """
 )
 
+def defdefs = List(
+  """
+def add(x: Nat, y: Nat): Nat = x
+""",
+  """
+def twice(A: Type, f: (x: A) -> A): (x: A) -> A =
+  x => f(f(x))
+""",
+  """
+def zero(A: Type, f: (x: A) -> A, x: A): A = x
+""",
+  """
+def succ(
+  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
+  A: Type,
+  f: (x: A) -> A,
+  x: A
+): A = f(n(A, f, x))
+""",
+)
+
 def parserExample(): Unit =
-  val tokens = Tokenizer.getTokens(prog2)
-  println(tokens)
+  // val tokens = Tokenizer.getTokens(prog2)
+  // println(tokens)
 
-  val e1 = Parser.parseExpr(expr1)
-  println(e1)
+  // val e1 = Parser.parseExpr(expr1)
+  // println(e1)
 
-  val e2 = Parser.parseExpr(expr3)
-  println(e2)
+  // val e2 = Parser.parseExpr(expr3)
+  // println(e2)
 
-  for ddef <- ddefs do {
+  // for ddef <- ddefs do {
+  //   println("==========")
+  //   println(ddef)
+  //   println("----------")
+  //   val x = Parser.parseDataDef(ddef)
+  //   println(x)
+  // }
+
+  for ddef <- defdefs do {
     println("==========")
     println(ddef)
     println("----------")
-    val x = Parser.parseDataDef(ddef)
+    val x = Parser.parseDefDef(ddef)
     println(x)
   }
 
 @main def hello: Unit = 
-  example()
-  // parserExample()
+  // example()
+  parserExample()
