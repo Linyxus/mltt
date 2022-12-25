@@ -4,20 +4,32 @@ import Level._
 import core._
 import Context._
 import parser._
+import ast.{TypedExprs => tpd}
+
 
 def example(): Unit = {
   val typer = new Typer
 
-  val e1 = Type(LZero)
-  println(typer.typed(e1)(using Context()))
+  // val e1 = Type(LZero)
+  // println(typer.typed(e1)(using Context()))
 
-  val e2 = PiIntro("x", Var("x"))
-  val pt2 = Pi("x", Type(LZero), Type(LZero))
-  println(typer.typed(e2, pt2)(using Context()))
+  // val e2 = PiIntro("x", Var("x"))
+  // val pt2 = tpd.PiType("x", tpd.Type(LZero), tpd.Type(LZero))
+  // println(typer.typed(e2, pt2)(using Context()))
 
-  val e3 = PiIntro("f", PiIntro("x", Apply(Var("f"), Var("x") :: Nil)))
-  val pt3 = Pi("f", Pi("z", Type(LZero), Type(LZero)), Pi("x", Type(LZero), Type(LZero)))
-  println(typer.typed(e3, pt3)(using Context()))
+  // val e3 = PiIntro("f", PiIntro("x", Apply(Var("f"), Var("x") :: Nil)))
+  // val pt3 = Pi("f", Pi("z", Type(LZero), Type(LZero)), Pi("x", Type(LZero), Type(LZero)))
+  // val tpt3 = typer.typed(pt3)(using Context())
+  // println(tpt3)
+  // println(typer.typed(e3, tpt3.getOrElse(null))(using Context()))
+
+  // locally {
+  //   val e = PiIntro("A", PiIntro("f", PiIntro("x", Apply(Var("f"), Apply(Var("f"), Var("x") :: Nil) :: Nil))))
+  //   val pt = Pi("A", Type(LZero), Pi("f", Pi("x", Var("A"), Var("A")), Pi("x", Var("A"), Var("A"))))
+  //   val tpt = typer.typed(pt)(using Context())
+  //   println(tpt)
+  //   println(typer.typed(e, tpt.getOrElse(null))(using Context()))
+  // }
 
   val def4 = DataDef(
     "Nat",
@@ -29,31 +41,31 @@ def example(): Unit = {
   )
   val res4 = typer.typedDataDef(def4)(using Context())
   println(res4)
-  println(res4.map(_.constructors))
+  // println(res4.map(_.constructors))
 
-  val def5 = DataDef(
-    "List",
-    Pi("A", Type(LZero), Type(LZero)),
-    List(
-      ConsDef("nil", Pi("A", Type(LZero), ApplyTypeCon("List", Var("A") :: Nil))),
-      ConsDef(
-        "cons",
-        Pi(
-          "A", Type(LZero),
-          Pi(
-            "x", Type(LZero),
-            Pi(
-              "xs", ApplyTypeCon("List", Var("A") :: Nil),
-              ApplyTypeCon("List", Var("A") :: Nil)
-            )
-          )
-        )
-      )
-    )
-  )
-  val res5 = typer.typedDataDef(def5)(using Context())
-  println(res5)
-  println(res5.map(_.constructors))
+  // val def5 = DataDef(
+  //   "List",
+  //   Pi("A", Type(LZero), Type(LZero)),
+  //   List(
+  //     ConsDef("nil", Pi("A", Type(LZero), ApplyTypeCon("List", Var("A") :: Nil))),
+  //     ConsDef(
+  //       "cons",
+  //       Pi(
+  //         "A", Type(LZero),
+  //         Pi(
+  //           "x", Type(LZero),
+  //           Pi(
+  //             "xs", ApplyTypeCon("List", Var("A") :: Nil),
+  //             ApplyTypeCon("List", Var("A") :: Nil)
+  //           )
+  //         )
+  //       )
+  //     )
+  //   )
+  // )
+  // val res5 = typer.typedDataDef(def5)(using Context())
+  // println(res5)
+  // println(res5.map(_.constructors))
 }
 
 val prog1 = """
@@ -126,5 +138,5 @@ def parserExample(): Unit =
   }
 
 @main def hello: Unit = 
-  // example()
-  parserExample()
+  example()
+  // parserExample()

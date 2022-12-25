@@ -8,34 +8,44 @@ object Symbols {
     type InfoType
 
     def info: InfoType
+    def name: String
+
+    override def toString(): String = s"Symbol($name)"
   }
 
-  case class PiTypeParamSymbol(binder: tpd.PiType) extends Symbol {
+  sealed trait ValSymbol extends Symbol {
     type InfoType = tpd.Expr
-    def info: InfoType = binder.argTyp
-    def name: String = binder.argName
   }
 
-  case class PiIntroParamSymbol(binder: tpd.PiIntro) extends Symbol {
+  sealed trait DefSymbol extends Symbol {
+    type InfoType <: DataInfo
+  }
+
+  trait DelayedInfo {
+    type InfoType
+    private var myInfo: InfoType | Null = null
+
+    def info: InfoType = myInfo.nn
+
+    def withInfo(info: InfoType): this.type =
+      myInfo = info
+      this
+  }
+
+  case class ParamSymbol(myName: String, myInfo: tpd.Expr) extends ValSymbol {
     type InfoType = tpd.Expr
-    def info: InfoType = binder.argTyp
-    def name: String = binder.argName
+    def info: InfoType = myInfo
+    def name: String = myName
   }
 
-  case class TypeConSymbol(tycon: TypeConInfo) extends Symbol {
+  case class TypeConSymbol() extends DefSymbol with DelayedInfo {
     type InfoType = TypeConInfo
-    def info: InfoType = tycon
+    def name: String = info.name
   }
 
-  case class DataConSymbol(datacon: DataConInfo) extends Symbol {
+  case class DataConSymbol() extends DefSymbol with DelayedInfo {
     type InfoType = DataConInfo
-    def info: InfoType = datacon
-  }
-
-  case class PatternBoundSymbol(mcase: tpd.CaseDef, paramIdx: Int) extends Symbol {
-    type InfoType = tpd.Expr
-    def info: InfoType = mcase.pat.datacon.info.paramTypeOf(paramIdx)
-    def name: String = mcase.pat.args(paramIdx)
+    def name: String = info.name
   }
 }
 

@@ -4,10 +4,11 @@ class Context:
   import Context._
   import DataInfo._
   import ast._
+  import core.Symbols._
 
   private var dataInfos: List[TypeConInfo] = List.empty
 
-  private var bindings: Map[String, Expr] = Map.empty
+  private var bindings: Map[String, ValSymbol] = Map.empty
 
   def fresh: Context =
     val freshCtx = new Context
@@ -15,9 +16,9 @@ class Context:
     freshCtx.bindings = bindings
     freshCtx
 
-  def withBinding[T](name: String, typ: Expr)(op: Context ?=> T): T =
+  def withBinding[T](sym: ValSymbol)(op: Context ?=> T): T =
     val freshCtx = fresh
-    freshCtx.bindings = bindings + (name -> typ)
+    freshCtx.bindings = bindings + (sym.name -> sym)
     op(using freshCtx)
 
   def withDataInfo[T](info: TypeConInfo)(op: Context ?=> T): T =
@@ -25,7 +26,7 @@ class Context:
     freshCtx.dataInfos = info :: dataInfos
     op(using freshCtx)
 
-  def lookupBindings(name: String): Option[Expr] = bindings.get(name)
+  def lookupBindings(name: String): Option[ValSymbol] = bindings.get(name)
 
   def lookupTypeConInfo(name: String): Option[TypeConInfo] =
     @scala.annotation.tailrec
@@ -59,7 +60,9 @@ class Context:
 object Context:
   import ast._
   import DataInfo._
-  type VarInfo = DataInfo | Expr
+  import core.Symbols._
+
+  type VarInfo = DataInfo | Symbol
   def apply(): Context = new Context
 
   def ctx(using Context): Context = summon[Context]

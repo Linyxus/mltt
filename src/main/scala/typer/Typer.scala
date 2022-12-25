@@ -2,54 +2,132 @@ package  typer
 
 import core._
 import ast._
+import ast.{TypedExprs => tpd}
+import Symbols._
+import ast.TypedExprs.PiTypeParamRef
+import ast.TypedExprs.PiIntroParamRef
 
 class Typer:
   import Typer._
   import DataInfo._
   import Context._
 
-  def isUniverse(e: Expr)(using Context): TyperResult[Unit] = e match
-    case _: Type => Right(())
-    case Wildcard => Right(())
+  def isUniverse(e: tpd.Expr)(using Context): TyperResult[Unit] = e match
+    case _: tpd.Type => Right(())
+    case tpd.Wildcard() => Right(())
     case _ => Left(s"not supported: isType($e)")
 
-  def typedDataDef(dataDef: DataDef)(using Context): TyperResult[TypeConInfo] =
-    def checkTypeConSig(sig: Expr): TyperResult[Unit] = sig match
-      case Type(l) => Right(())
-      case Pi(argName, argTyp, resTyp) => checkTypeConSig(resTyp)
-      case _ => Left(s"invalid datadef signature: ${dataDef.sig}")
+  def typedDataDef(ddef: DataDef)(using Context): TyperResult[TypeConInfo] =
+    def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
+      case tpd.Type(l) => Right(())
+      case tpd.PiType(_, _, resTyp) => checkTypeConSig(resTyp)
+      case tp => Left(s"type constructor must return a type, but found $tp")
 
-    def checkDataConSig(sig: Expr): TyperResult[Unit] = sig match
-      case ApplyTypeCon(name, _) if name == dataDef.name => Right(())
-      case Pi(_, _, resTyp) => checkDataConSig(resTyp)
-      case _ => Left(s"invalid data constructor signature: $sig")
-
-    def typedDataCon(consDef: ConsDef): TyperResult[TypeConInfo => DataConInfo] =
-      val dummy = TypeConInfo(dataDef.name, ???, _ => Nil)
-      ctx.withDataInfo(dummy) {
-        checkDataConSig(consDef.sig).flatMap { _ =>
-          typed(consDef.sig).map(_ => (info: TypeConInfo) => DataConInfo(consDef.name, info, ???))
+    def typedDataCon(tyconSym: TypeConSymbol, tycon: TypeConInfo, cdef: ConsDef)(using Context): TyperResult[TypeConInfo => DataConInfo] =
+      def checkDataConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
+        case tpd.AppliedTypeCon(sym, _) if sym eq tyconSym => Right(())
+        case tpd.PiType(_, _, resTyp) => checkDataConSig(resTyp)
+        case tp => Left(s"data constructor must return ${tycon.name}, but found $tp")
+      typed(cdef.sig) flatMap { dataconSig =>
+        checkDataConSig(dataconSig) map { _ =>
+          (tycon: TypeConInfo) =>
+            val sym = DataConSymbol()
+            val info = DataConInfo(cdef.name, sym, tycon, dataconSig)
+            sym.withInfo(info)
+            info
         }
       }
 
-    checkTypeConSig(dataDef.sig).flatMap { _ =>
-      typed(dataDef.sig).flatMap { _ =>
-        val dataconsM: List[TyperResult[TypeConInfo => DataConInfo]] = dataDef.constructors.map(typedDataCon(_))
-        collectAll(dataconsM) map { datacons =>
-          TypeConInfo(dataDef.name, ???, (info: TypeConInfo) => datacons.map(f => f(info)))
+    def typedDataCons(tyconSym: TypeConSymbol, tycon: TypeConInfo, cdefs: List[ConsDef])(using Context): TyperResult[List[TypeConInfo => DataConInfo]] =
+      def recur(cds: List[ConsDef], acc: List[TypeConInfo => DataConInfo]): TyperResult[List[TypeConInfo => DataConInfo]] =
+        cds match
+          case Nil => Right(acc.reverse)
+          case cdef :: ds => typedDataCon(tyconSym, tycon, cdef) match
+            case Left(err) => Left(err)
+            case Right(dinfo) =>
+              recur(ds, dinfo :: acc)
+      recur(cdefs, Nil)
+
+    typed(ddef.sig) flatMap { tyconSig =>
+      checkTypeConSig(tyconSig) flatMap { _ =>
+        // type data constructors
+        val tyconSym = TypeConSymbol()
+        val dummy = TypeConInfo(ddef.name, tyconSym, tyconSig, _ => Nil)
+        tyconSym.withInfo(dummy)
+        ctx.withDataInfo(dummy) {
+          typedDataCons(tyconSym, dummy, ddef.constructors)
+        } map { datacons =>
+          val res = TypeConInfo(ddef.name, tyconSym, tyconSig, tycon => datacons.map(_(tycon)))
+          tyconSym.withInfo(res)
+          res
         }
       }
     }
 
-  def isMatchingTypes(tp: Expr, pt: Expr)(using Context): TyperResult[Unit] =
+  // def typedDataDef(dataDef: DataDef)(using Context): TyperResult[TypeConInfo] =
+  //   def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
+  //     case tpd.Type(l) => Right(())
+  //     case tpd.PiType(argName, argTyp, resTyp) => checkTypeConSig(resTyp)
+  //     case _ => Left(s"invalid datadef signature: ${dataDef.sig}")
+
+  //   def checkDataConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
+  //     case tpd.AppliedDataCon(symbol, _) if symbol.name == dataDef.name => Right(())
+  //     case tpd.PiType(_, _, resTyp) => checkDataConSig(resTyp)
+  //     case _ => Left(s"invalid data constructor signature: $sig")
+
+  //   def typedDataCon(consDef: ConsDef): TyperResult[TypeConInfo => DataConInfo] =
+  //     val dummy = TypeConInfo(dataDef.name, ???, _ => Nil)
+  //     ctx.withDataInfo(dummy) {
+  //       checkDataConSig(consDef.sig).flatMap { _ =>
+  //         typed(consDef.sig).map(_ => (info: TypeConInfo) => DataConInfo(consDef.name, info, ???))
+  //       }
+  //     }
+
+  //   checkTypeConSig(dataDef.sig).flatMap { _ =>
+  //     typed(dataDef.sig).flatMap { _ =>
+  //       val dataconsM: List[TyperResult[TypeConInfo => DataConInfo]] = dataDef.constructors.map(typedDataCon(_))
+  //       collectAll(dataconsM) map { datacons =>
+  //         TypeConInfo(dataDef.name, ???, (info: TypeConInfo) => datacons.map(f => f(info)))
+  //       }
+  //     }
+  //   }
+
+  def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
+    (tp1, tp2) match
+      case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
+        compareTypes(argTyp1, argTyp2) flatMap { _ =>
+          val sym = ParamSymbol(argName2, argTyp2)
+          val resType1 = substBinder(tp1, tpd.ValRef(sym), resTyp1)
+          val resType2 = substBinder(tp2, tpd.ValRef(sym), resTyp2)
+          compareTypes(resType1, resType2)
+        }
+      case (tp1 @ tpd.PiIntro(argName1, argTyp1), tp2 @ tpd.PiIntro(argName2, argTyp2)) =>
+        compareTypes(argTyp1, argTyp2) flatMap { _ =>
+          val sym = ParamSymbol(argName2, argTyp2)
+          val body1 = substBinder(tp1, tpd.ValRef(sym), tp1.body)
+          val body2 = substBinder(tp2, tpd.ValRef(sym), tp2.body)
+          compareTypes(body1, body2)
+        }
+      case (tp1, tp2) => if tp1 == tp2 then Right(()) else Left(s"Type mismatch: $tp1 vs $tp2")
+
+  def isMatchingTypes(tp: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] =
     // isUniverse(tp) flatMap { _ =>
     //   isUniverse(pt) flatMap { _ =>
         pt match {
-          case Wildcard => Right(())
-          case pt => if pt == tp then Right(()) else Left(s"type mismatch: $tp and $pt")
+          case null => Right(())
+          case pt: tpd.Expr => compareTypes(tp, pt)
         }
     //   }
     // }
+
+  def substBinder[T <: tpd.PiType | tpd.PiIntro](binder: T, to: tpd.Expr, expr: tpd.Expr)(using Context): tpd.Expr =
+    val exprMap = new tpd.ExprMap:
+      override def mapPiTypeParamRef(e: tpd.PiTypeParamRef): tpd.Expr =
+        if e.binder eq binder then to else super.mapPiTypeParamRef(e)
+
+      override def mapPiIntroParamRef(e: tpd.PiIntroParamRef): tpd.Expr =
+        if e.binder eq binder then to else super.mapPiIntroParamRef(e)
+    exprMap(expr)
 
   def substBinder(name: String, to: Expr, expr: Expr)(using Context): Expr =
     def k(expr: Expr): Expr = substBinder(name, to, expr)
@@ -64,12 +142,16 @@ class Typer:
       case Type(level) => expr
       case Wildcard => Wildcard
 
-  def typed(e: Expr, pt: Expr = Wildcard)(using Context): TyperResult[Expr] =
-    typed1(e, pt) flatMap { tpe => isMatchingTypes(tpe, pt).map(_ => tpe) }
+  def typed(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
+    val showPt = if pt eq null then "<null>" else pt.toString
+    // println(s"typing $e, pt = $showPt")
+    typed1(e, pt) flatMap { e1 =>
+      isMatchingTypes(e1.tpe, pt).map(_ => e1)
+    }
 
-  def typed1(e: Expr, pt: Expr = Wildcard)(using Context): TyperResult[Expr] = e match
+  def typed1(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] = e match
     case Var(name) => ctx.lookupBindings(name) match {
-      case Some(expr) => isMatchingTypes(expr, pt).map(_ => expr)
+      case Some(sym) => Right(tpd.ValRef(sym))
       case None => Left(s"unknown variable $name")
     }
     case Apply(expr, args) => typedApply(expr, args)
@@ -86,29 +168,62 @@ class Typer:
       ctx.lookupDataConInfo(name, getExpectedTypeCon) match
         case None => Left(s"unknown data constructor $name")
         case Some(con) => typedApplyDataCon(con, args)
-    case Pi(arg, typ, resTyp) =>
-      typed(typ) flatMap {
-        case Type(lTyp) =>
-          ctx.withBinding(arg, typ) {
-            typed(resTyp) flatMap {
-              case Type(lRes) =>
-                Right(Type(lTyp lub lRes))
-              case _ =>
-                Left(s"return type $typ is not a type")
-            }
-          }
-        case _ => Left(s"cannot abstract over $typ")
-      }
+    case Pi(arg, typ, resTyp) => typedPi(arg, typ, resTyp)
     case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
-    case Type(l) => Right(Type(Level.LSucc(l)))
+    case Type(l) => Right(tpd.Type(l))
     case _ => Left(s"not supported: typed($e)")
 
-  def typedPiIntro(argName: String, body: Expr, pt: Expr)(using Context): TyperResult[Expr] =
+  private def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr)(using Context): tpd.Expr =
+    val treeMap = new tpd.ExprMap:
+      override def mapValRef(e: tpd.ValRef): tpd.Expr =
+        if e.sym eq sym then target else super.mapValRef(e)
+      // override def apply(e: tpd.Expr): tpd.Expr =
+      //   println(s"abstracting symbol for $e")
+      //   super.apply(e)
+    treeMap(e)
+
+  private def liftParamRefInType(from: tpd.PiIntroParamRef, to: tpd.PiTypeParamRef, tp: tpd.Expr): tpd.Expr =
+    val treeMap = new tpd.ExprMap:
+      // override def isDebugging: Boolean = true
+      override def mapPiIntroParamRef(e: PiIntroParamRef): ast.TypedExprs.Expr =
+        if e eq from then to else super.mapPiIntroParamRef(e)
+    treeMap(tp)
+
+  def typedPi(argName: String, argTyp: Expr, resTyp: Expr)(using Context): TyperResult[tpd.Expr] =
+    typed(argTyp) flatMap { argTyp1 =>
+      argTyp1.tpe match
+        case tpd.Type(l1) =>
+          val sym = ParamSymbol(argName, argTyp1)
+          ctx.withBinding(sym) {
+            typed(resTyp)
+          } flatMap { resTyp1 =>
+            resTyp1.tpe match
+              case tpd.Type(l2) =>
+                val l = l1 lub l2
+                val pref = tpd.PiTypeParamRef()
+                val resTyp2 = abstractSymbol(sym, pref, resTyp1)
+                val binder = tpd.PiType(argName, argTyp1, resTyp2).withType(tpd.Type(l))
+                pref.overwriteBinder(binder)
+                Right(binder)
+              case _ => Left(s"return type $resTyp1 is not a type")
+          }
+        case _ => Left(s"cannot abstract over $argTyp1")
+    }
+
+  def typedPiIntro(argName: String, body: Expr, pt: tpd.Expr)(using Context): TyperResult[tpd.Expr] =
     pt match
-      case Pi(eargName, eargTyp, eresTyp) =>
-        typed(eargTyp).flatMap { tpe =>
-          isUniverse(tpe) flatMap { _ =>
-            ctx.withBinding(eargName, eargTyp)(typed(substBinder(argName, Var(eargName), body), eresTyp).map(Pi(eargName, eargTyp, _)))
+      case pt @ tpd.PiType(eargName, eargTyp, eresTyp) =>
+        isUniverse(eargTyp.tpe) flatMap { _ =>
+          val binder = tpd.PiIntro(eargName, eargTyp)
+          val sym = ParamSymbol(eargName, eargTyp)
+          ctx.withBinding(sym)(typed(substBinder(argName, Var(eargName), body), substBinder(pt, tpd.ValRef(sym), eresTyp))) map { body =>
+            val pref = tpd.PiIntroParamRef().overwriteBinder(binder)
+            val body1 = abstractSymbol(sym, pref, body)
+
+            val tpref = tpd.PiTypeParamRef()
+            val tpe = tpd.PiType(eargName, eargTyp, liftParamRefInType(pref, tpref, body1.tpe)).withType()
+            tpref.overwriteBinder(tpe)
+            binder.withBody(body1).withType(tpe)
           }
         }
       case _ => Left(s"cannot type function with expected type $pt")
@@ -117,31 +232,50 @@ class Typer:
     case Nil => Right(Nil)
     case x :: xs => x.flatMap(x => collectAll(xs).map(x :: _))
 
-  def typedArgs(actual: List[Expr], expected: List[Expr])(using Context): TyperResult[Unit] =
-    if actual.length != expected.length then Left(s"number of argument mismatch")
+  def retriveAppliedArguments(expr: tpd.Expr): List[tpd.Expr] =
+    @annotation.tailrec def recur(e: tpd.Expr, acc: List[tpd.Expr]): List[tpd.Expr] = e match
+      case tpd.PiElim(app, arg) => recur(app, arg :: acc)
+      case _ => acc
+    recur(expr, Nil)
+
+  def typedApplyTypeCon(info: TypeConInfo, args: List[Expr])(using Context): TyperResult[tpd.Expr] =
+    if args.length == info.paramNum then
+      val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
+      typedApplyFunctionParams(dummy, args) map { res =>
+        val resTyp = res.tpe
+        val args = retriveAppliedArguments(res)
+        tpd.AppliedTypeCon(info.symbol, args).withType(resTyp)
+      }
     else
-      def resArgs: List[TyperResult[Expr]] = actual.zip(expected).map((a, e) => typed(a, e))
-      collectAll(resArgs).map(_ => ())
+      Left(s"incorrect param num for type constructor ${info.name}")
 
-  def typedApplyTypeCon(info: TypeConInfo, args: List[Expr])(using Context): TyperResult[Expr] =
-    typedApplyFunctionParams(???, args)
+  def typedApplyDataCon(info: DataConInfo, args: List[Expr])(using Context): TyperResult[tpd.Expr] =
+    if args.length == info.paramNum then
+      val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
+      typedApplyFunctionParams(dummy, args) map { res =>
+        val resTyp = res.tpe
+        val args = retriveAppliedArguments(res)
+        tpd.AppliedDataCon(info.symbol, args).withType(resTyp)
+      }
+    else
+      Left(s"incorrect param num for data constructor ${info.name}")
 
-  def typedApplyDataCon(info: DataConInfo, args: List[Expr])(using Context): TyperResult[Expr] =
-    typedApplyFunctionParams(???, args)
+  def typedApplyFunction(fun: tpd.Expr, arg: Expr)(using Context): TyperResult[tpd.Expr] =
+    fun.tpe match
+      case funType @ tpd.PiType(argName, typ, resTyp) =>
+        typed(arg, typ) map { arg =>
+          val tpe = substBinder(funType, arg, resTyp)
+          tpd.PiElim(fun, arg).withType(tpe)
+        }
+      case _ => Left(s"cannot apply value $fun of type ${fun.tpe}")
 
-  def typedApplyFunction(funType: Expr, arg: Expr)(using Context): TyperResult[Expr] =
-    funType match
-      case Pi(argName, typ, resTyp) =>
-        typed(arg, typ) map { _ => substBinder(argName, arg, resTyp) }
-      case _ => Left(s"cannot apply value of type $funType")
-
-  def typedApplyFunctionParams(funType: Expr, arg: List[Expr])(using Context): TyperResult[Expr] =
-    def recur(xs: List[Expr], acc: TyperResult[Expr]): TyperResult[Expr] = xs match
+  def typedApplyFunctionParams(fun: tpd.Expr, arg: List[Expr])(using Context): TyperResult[tpd.Expr] =
+    def recur(xs: List[Expr], acc: TyperResult[tpd.Expr]): TyperResult[tpd.Expr] = xs match
       case Nil => acc
       case x :: xs => recur(xs, acc.flatMap(typedApplyFunction(_, x)))
-    recur(arg, Right(funType))
+    recur(arg, Right(fun))
 
-  def typedApply(fun: Expr, args: List[Expr])(using Context): TyperResult[Expr] =
+  def typedApply(fun: Expr, args: List[Expr])(using Context): TyperResult[tpd.Expr] =
     fun match
       case Var(funcName) =>
         ctx.lookup(funcName) match
@@ -149,9 +283,15 @@ class Typer:
           case Some(info) => info match
             case info: TypeConInfo => typedApplyTypeCon(info, args)
             case info: DataConInfo => typedApplyDataCon(info, args)
-            case typ: Expr => typedApplyFunctionParams(typ, args)
+            case _ =>
+              typed(fun) flatMap { fun =>
+                typedApplyFunctionParams(fun, args)
+              }
             case _ => Left(s"not supported: $info as the function in typedApply")
-      case _ => Left(s"not supported: applying $fun")
+      case _ =>
+        typed(fun) flatMap { fun =>
+          typedApplyFunctionParams(fun, args)
+        }
 
 
 object Typer:
