@@ -1,6 +1,8 @@
 package parser
 
 import ast._
+import ast.{Commands => cmd}
+import scala.annotation.tailrec
 
 class Parser(source: String):
   import Parser._
@@ -240,6 +242,31 @@ class Parser(source: String):
       }
     }
 
+  def parsePrintln: ParseResult[cmd.Normalise] =
+    matchAhead(Println()) flatMap { _ =>
+      matchAhead(LeftParen()) flatMap { _ =>
+        parseExpr flatMap { body =>
+          matchAhead(RightParen()).map(_ => cmd.Normalise(body))
+        }
+      }
+    }
+
+  def parseDef: ParseResult[Definition] =
+    peekType match
+      case Println() => parsePrintln
+      case Def() => parseDefDef
+      case Enum() => parseDataDef
+      case _ => Left(s"expecting start of definition, but found $peekType")
+
+  def parseDefs: ParseResult[List[Definition]] =
+    @annotation.tailrec def recur(acc: List[Definition]): ParseResult[List[Definition]] =
+      peekType match
+        case EOF() => Right(acc.reverse)
+        case _ => parseDef match
+          case Left(err) => Left(err)
+          case Right(x) => recur(x :: acc)
+    recur(Nil)
+
 object Parser:
   type ParseResult[+X] = Either[String, X]
 
@@ -254,3 +281,7 @@ object Parser:
   def parseDefDef(source: String): ParseResult[DefDef] =
     val parser = new Parser(source)
     parser.parseDefDef
+
+  def parseProgram(source: String): ParseResult[List[Definition]] =
+    val parser = new Parser(source)
+    parser.parseDefs

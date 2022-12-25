@@ -92,6 +92,23 @@ class Typer:
   //     }
   //   }
 
+  def typedDefDef(ddef: DefDef)(using Context): TyperResult[ValInfo] =
+    ctx.lookupValDef(ddef.name) match
+      case Some(_) => Left(s"already defined: ${ddef.name}")
+      case None =>
+        typed(ddef.typ) flatMap { sig =>
+          val sym = ValDefSymbol(ddef.name)
+          val dummy = ValInfo(sym, sig, tpd.Wildcard())
+          sym.overwriteValInfo(dummy)
+          ctx.withValInfo(dummy) {
+            typed(ddef.body, sig) map { body =>
+              val res = ValInfo(sym, sig, body)
+              sym.overwriteValInfo(res)
+              res
+            }
+          }
+        }
+
   def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
     (tp1, tp2) match
       case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
@@ -150,9 +167,10 @@ class Typer:
     }
 
   def typed1(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] = e match
-    case Var(name) => ctx.lookupBindings(name) match {
+    case Var(name) => ctx.lookupVal(name) match {
       case Some(sym) => Right(tpd.ValRef(sym))
-      case None => Left(s"unknown variable $name")
+      case None =>
+        Left(s"unknown variable $name")
     }
     case Apply(expr, args) => typedApply(expr, args)
     case ApplyTypeCon(name, args) =>
@@ -293,6 +311,19 @@ class Typer:
           typedApplyFunctionParams(fun, args)
         }
 
+  def typedDefinition(d: Definition)(using Context): TyperResult[Unit] =
+    d match
+      case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
+      case ddef: DefDef => typedDefDef(ddef) map { info => ctx.addValInfo(info) }
+      case p: Commands.Normalise => typed(p.expr) map { te => println(te) }
+      case _ => Left(s"unsupported: $d")
+
+  def typedProgram(defs: List[Definition])(using Context): TyperResult[Unit] =
+    def recur(ds: List[Definition]): TyperResult[Unit] =
+      ds match
+        case Nil => Right(())
+        case d :: ds => typedDefinition(d) flatMap { _ => recur(ds) }
+    recur(defs)
 
 object Typer:
   type TyperResult[+X] = Either[String, X]

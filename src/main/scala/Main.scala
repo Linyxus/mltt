@@ -140,6 +140,8 @@ def succ(
 """,
 )
 
+val progs = List()
+
 def parserExample(): Unit =
   // val tokens = Tokenizer.getTokens(prog2)
   // println(tokens)
@@ -158,14 +160,73 @@ def parserExample(): Unit =
   //   println(x)
   // }
 
-  for ddef <- defdefs do {
+  // for ddef <- defdefs do {
+  //   println("==========")
+  //   println(ddef)
+  //   println("----------")
+  //   val x = Parser.parseDefDef(ddef)
+  //   println(x)
+  // }
+
+  for prog <- progs do {
     println("==========")
-    println(ddef)
+    println(prog)
     println("----------")
-    val x = Parser.parseDefDef(ddef)
+    val x = Parser.parseProgram(prog)
     println(x)
   }
 
+def typerExample(): Unit =
+  val progs =
+    """
+enum Nat extends Type:
+  case Zero() extends Nat()
+  case Succ(pred: Nat()) extends Nat()
+
+println(Nat())
+println(Zero())
+println(Succ(Zero()))
+""" :: """
+enum Nat extends Type:
+  case Zero() extends Nat()
+  case Succ(pred: Nat()) extends Nat()
+
+def nat: Type = Nat()
+def add2(n: Nat()): Nat() = Succ(Succ(n))
+println(nat)
+""" :: """
+enum Nat extends Type:
+  case Zero() extends Nat()
+  case Succ(pred: Nat()) extends Nat()
+
+enum List(A: Type) extends Type:
+  case Nil(A: Type) extends List(A)
+  case Cons(A: Type, head: A, tail: List(A)) extends List(A)
+
+def zero: Nat() = Zero()
+def one: Nat() = Succ(zero)
+println(one)
+
+def l1: List(Nat()) = Nil(Nat())
+println(l1)
+
+def l2: List(Nat()) = Cons(Nat(), zero, l1)
+println(l2)
+""" :: Nil
+  for prog <- progs do
+    println("==========")
+    println(prog)
+    println("----------")
+    val x = Parser.parseProgram(prog)
+    println(x)
+    x map { defs =>
+      println(s"* parsed defs: $defs")
+      val typer = new Typer
+      val res = typer.typedProgram(defs)(using Context())
+      println(res)
+    }
+
 @main def hello: Unit = 
   // example()
-  parserExample()
+  // parserExample()
+  typerExample()

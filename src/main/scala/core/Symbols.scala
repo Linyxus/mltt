@@ -38,6 +38,15 @@ object Symbols {
     def name: String = myName
   }
 
+  case class ValDefSymbol(myName: String) extends ValSymbol {
+    def info: InfoType = dealias.typ
+    def name: String = myName
+
+    private var myDef: ValInfo | Null = null
+    def overwriteValInfo(info: ValInfo): Unit = myDef = info
+    def dealias: ValInfo = myDef.nn
+  }
+
   case class TypeConSymbol() extends DefSymbol with DelayedInfo {
     type InfoType = TypeConInfo
     def name: String = info.name

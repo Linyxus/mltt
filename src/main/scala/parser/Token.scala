@@ -27,6 +27,7 @@ case class Extends() extends TokenType
 case class Case() extends TokenType
 case class Def() extends TokenType
 case class Match() extends TokenType
+case class Println() extends TokenType
 
 // newlines, indents
 case class NewLine() extends TokenType

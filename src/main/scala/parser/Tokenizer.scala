@@ -67,7 +67,8 @@ class Tokenizer(source: String):
     "extends" -> Extends(),
     "case" -> Case(),
     "def" -> Def(),
-    "match" -> Match()
+    "match" -> Match(),
+    "println" -> Println(),
   )
 
   def expect(ch: Char): Boolean =

@@ -8,11 +8,14 @@ class Context:
 
   private var dataInfos: List[TypeConInfo] = List.empty
 
+  private var valInfos: List[ValInfo] = List.empty
+
   private var bindings: Map[String, ValSymbol] = Map.empty
 
   def fresh: Context =
     val freshCtx = new Context
     freshCtx.dataInfos = dataInfos
+    freshCtx.valInfos = valInfos
     freshCtx.bindings = bindings
     freshCtx
 
@@ -23,8 +26,19 @@ class Context:
 
   def withDataInfo[T](info: TypeConInfo)(op: Context ?=> T): T =
     val freshCtx = fresh
-    freshCtx.dataInfos = info :: dataInfos
+    freshCtx.addDataInfo(info)
     op(using freshCtx)
+
+  def withValInfo[T](info: ValInfo)(op: Context ?=> T): T =
+    val freshCtx = fresh
+    freshCtx.addValInfo(info)
+    op(using freshCtx)
+
+  def addDataInfo(info: TypeConInfo): Unit =
+    dataInfos = info :: dataInfos
+
+  def addValInfo(info: ValInfo): Unit =
+    valInfos = info :: valInfos
 
   def lookupBindings(name: String): Option[ValSymbol] = bindings.get(name)
 
@@ -54,13 +68,25 @@ class Context:
         recur(dataInfos)
       case Some(tyconName) => lookupTypeConInfo(tyconName).flatMap(lookupIn)
 
+  def lookupValDef(name: String): Option[ValDefSymbol] =
+    @annotation.tailrec def recur(xs: List[ValInfo]): Option[ValDefSymbol] =
+      xs match
+        case x :: xs => if x.sym.name == name then Some(x.sym) else recur(xs)
+        case Nil => None
+    recur(valInfos)
+
+  def lookupVal(name: String): Option[ValSymbol] =
+    lookupBindings(name).orElse(lookupValDef(name))
+
   def lookup(name: String): Option[VarInfo] =
-    lookupTypeConInfo(name) orElse lookupDataConInfo(name, None) orElse lookupBindings(name)
+    lookupTypeConInfo(name) orElse lookupDataConInfo(name, None) orElse lookupVal(name)
 
 object Context:
   import ast._
   import DataInfo._
   import core.Symbols._
+
+  type DefInfo = ValInfo | DataInfo
 
   type VarInfo = DataInfo | Symbol
   def apply(): Context = new Context

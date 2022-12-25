@@ -1,0 +1,4 @@
+package ast
+
+trait Definition
+
