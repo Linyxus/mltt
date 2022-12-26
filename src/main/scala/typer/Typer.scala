@@ -111,6 +111,7 @@ class Typer:
 
   def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
     (tp1, tp2) match
+      case (tp1, tp2) if tp1 == tp2 => Right(())
       case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
         compareTypes(argTyp1, argTyp2) flatMap { _ =>
           val sym = ParamSymbol(argName2, argTyp2)
@@ -132,32 +133,11 @@ class Typer:
     //   isUniverse(pt) flatMap { _ =>
         pt match {
           case null => Right(())
-          case pt: tpd.Expr => compareTypes(tp, pt)
+          case pt: tpd.Expr =>
+            compareTypes(tp, pt)
         }
     //   }
     // }
-
-  def substBinder[T <: tpd.PiType | tpd.PiIntro](binder: T, to: tpd.Expr, expr: tpd.Expr)(using Context): tpd.Expr =
-    val exprMap = new tpd.ExprMap:
-      override def mapPiTypeParamRef(e: tpd.PiTypeParamRef): tpd.Expr =
-        if e.binder eq binder then to else super.mapPiTypeParamRef(e)
-
-      override def mapPiIntroParamRef(e: tpd.PiIntroParamRef): tpd.Expr =
-        if e.binder eq binder then to else super.mapPiIntroParamRef(e)
-    exprMap(expr)
-
-  def substBinder(name: String, to: Expr, expr: Expr)(using Context): Expr =
-    def k(expr: Expr): Expr = substBinder(name, to, expr)
-    expr match
-      case Var(name1) => if name1 == name then to else Var(name1)
-      case Pi(arg, typ, resTyp) => if arg == name then expr else Pi(arg, k(typ), k(resTyp))
-      case PiIntro(arg, body) => if arg == name then expr else PiIntro(arg, k(body))
-      case Apply(func, args) => Apply(k(func), args.map(k))
-      case ApplyTypeCon(name, args) => ApplyTypeCon(name, args.map(k))
-      case ApplyDataCon(name, args) => ApplyDataCon(name, args.map(k))
-      case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, k(body)) })
-      case Type(level) => expr
-      case Wildcard => Wildcard
 
   def typed(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
     val showPt = if pt eq null then "<null>" else pt.toString
@@ -328,3 +308,24 @@ class Typer:
 object Typer:
   type TyperResult[+X] = Either[String, X]
 
+  def substBinder[T <: tpd.PiType | tpd.PiIntro](binder: T, to: tpd.Expr, expr: tpd.Expr)(using Context): tpd.Expr =
+    val exprMap = new tpd.ExprMap:
+      override def mapPiTypeParamRef(e: tpd.PiTypeParamRef): tpd.Expr =
+        if e.binder eq binder then to else super.mapPiTypeParamRef(e)
+
+      override def mapPiIntroParamRef(e: tpd.PiIntroParamRef): tpd.Expr =
+        if e.binder eq binder then to else super.mapPiIntroParamRef(e)
+    exprMap(expr)
+
+  def substBinder(name: String, to: Expr, expr: Expr)(using Context): Expr =
+    def k(expr: Expr): Expr = substBinder(name, to, expr)
+    expr match
+      case Var(name1) => if name1 == name then to else Var(name1)
+      case Pi(arg, typ, resTyp) => if arg == name then expr else Pi(arg, k(typ), k(resTyp))
+      case PiIntro(arg, body) => if arg == name then expr else PiIntro(arg, k(body))
+      case Apply(func, args) => Apply(k(func), args.map(k))
+      case ApplyTypeCon(name, args) => ApplyTypeCon(name, args.map(k))
+      case ApplyDataCon(name, args) => ApplyDataCon(name, args.map(k))
+      case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, k(body)) })
+      case Type(level) => expr
+      case Wildcard => Wildcard

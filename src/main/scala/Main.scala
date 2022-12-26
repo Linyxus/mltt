@@ -212,6 +212,22 @@ println(l1)
 
 def l2: List(Nat()) = Cons(Nat(), zero, l1)
 println(l2)
+""" :: """
+def zero(
+  A: Type,
+  f: (x: A) -> A,
+  x: A
+): A = x
+def succ(
+  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
+  A: Type,
+  f: (x: A) -> A,
+  x: A
+): A = f(n(A, f, x))
+
+println(zero)
+println(succ(zero))
+println(succ(succ(zero)))
 """ :: Nil
   for prog <- progs do
     println("==========")

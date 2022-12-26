@@ -42,6 +42,8 @@ object TypedExprs {
         case _ => assert(false)
 
     def withType(): this.type = withType(computeType)
+
+    override def toString(): String = s"PiType@${hashCode()}($argName, $argTyp, $resTyp)"
   }
   case class PiTypeParamRef() extends Expr with ParamRef {
     type BinderType = PiType
