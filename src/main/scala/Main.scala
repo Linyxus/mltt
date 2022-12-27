@@ -178,41 +178,49 @@ def parserExample(): Unit =
 
 def typerExample(): Unit =
   val progs =
-    """
-enum Nat extends Type:
-  case Zero() extends Nat()
-  case Succ(pred: Nat()) extends Nat()
+//     """
+// enum Nat extends Type:
+//   case Zero() extends Nat()
+//   case Succ(pred: Nat()) extends Nat()
 
-println(Nat())
-println(Zero())
-println(Succ(Zero()))
-""" :: """
-enum Nat extends Type:
-  case Zero() extends Nat()
-  case Succ(pred: Nat()) extends Nat()
+// println(Nat())
+// println(Zero())
+// println(Succ(Zero()))
+// """ ::
+//    """
+// enum Nat extends Type:
+//   case Zero() extends Nat()
+//   case Succ(pred: Nat()) extends Nat()
 
-def nat: Type = Nat()
-def add2(n: Nat()): Nat() = Succ(Succ(n))
-println(nat)
-""" :: """
-enum Nat extends Type:
-  case Zero() extends Nat()
-  case Succ(pred: Nat()) extends Nat()
+// def nat: Type = Nat()
+// def add2(n: Nat()): Nat() = Succ(Succ(n))
+// println(nat)
+// """ :: Nil
+//      """
+// enum Nat extends Type:
+//   case Zero() extends Nat()
+//   case Succ(pred: Nat()) extends Nat()
 
-enum List(A: Type) extends Type:
-  case Nil(A: Type) extends List(A)
-  case Cons(A: Type, head: A, tail: List(A)) extends List(A)
+// enum List(A: Type) extends Type:
+//   case Nil(A: Type) extends List(A)
+//   case Cons(A: Type, head: A, tail: List(A)) extends List(A)
 
-def zero: Nat() = Zero()
-def one: Nat() = Succ(zero)
-println(one)
+// def zero: Nat() = Zero()
+// def one: Nat() = Succ(zero)
+// println(one)
 
-def l1: List(Nat()) = Nil(Nat())
-println(l1)
+// def addOne(x: Nat()): Nat() = Succ(x)
+// def two: Nat() = addOne(one)
+// println(two)
+// println(addOne)
+// """ :: Nil
 
-def l2: List(Nat()) = Cons(Nat(), zero, l1)
-println(l2)
-""" :: """
+// def l1: List(Nat()) = Nil(Nat())
+// println(l1)
+
+// def l2: List(Nat()) = Cons(Nat(), zero, l1)
+// println(l2)
+       """
 def zero(
   A: Type,
   f: (x: A) -> A,
@@ -228,15 +236,34 @@ def succ(
 println(zero)
 println(succ(zero))
 println(succ(succ(zero)))
+
+def add(
+  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
+  m: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
+  A: Type,
+  f: (x: A) -> A,
+  x: A
+): A = m(A, f, n(A, f, x))
+def one: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A = succ(zero)
+def two: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A = succ(one)
+def three: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A = add(two, one)
+
+def mult(
+  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
+  m: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
+  A: Type,
+  f: (x: A) -> A,
+  x: A
+): A = n((A: Type) -> (f: (x: A) -> A) -> (x: A) -> A, add(m), zero)
 """ :: Nil
   for prog <- progs do
     println("==========")
     println(prog)
     println("----------")
     val x = Parser.parseProgram(prog)
-    println(x)
+    // println(x)
     x map { defs =>
-      println(s"* parsed defs: $defs")
+      // println(s"* parsed defs: $defs")
       val typer = new Typer
       val res = typer.typedProgram(defs)(using Context())
       println(res)

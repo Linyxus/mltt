@@ -19,6 +19,10 @@ class EvalContext:
     freshCtx.store = store
     freshCtx
 
+  def addBinding(sym: ValSymbol, value: Value): Unit = store = store + (sym -> value)
+
+  override def toString(): String = s"EvalContext($store)"
+
 object EvalContext:
   def ctx(using EvalContext): EvalContext = summon[EvalContext]
 

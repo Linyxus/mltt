@@ -6,6 +6,8 @@ import ast.{TypedExprs => tpd}
 import Symbols._
 import ast.TypedExprs.PiTypeParamRef
 import ast.TypedExprs.PiIntroParamRef
+import evaluator.{EvalContext, Evaluator}
+import utils.trace
 
 class Typer:
   import Typer._
@@ -16,6 +18,9 @@ class Typer:
     case _: tpd.Type => Right(())
     case tpd.Wildcard() => Right(())
     case _ => Left(s"not supported: isType($e)")
+
+  def normalise(e: tpd.Expr)(using Context): tpd.Expr =
+    Evaluator.normalise(e)(using ctx.toEvalContext)
 
   def typedDataDef(ddef: DataDef)(using Context): TyperResult[TypeConInfo] =
     def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
@@ -128,22 +133,21 @@ class Typer:
         }
       case (tp1, tp2) => if tp1 == tp2 then Right(()) else Left(s"Type mismatch: $tp1 vs $tp2")
 
-  def isMatchingTypes(tp: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] =
-    // isUniverse(tp) flatMap { _ =>
-    //   isUniverse(pt) flatMap { _ =>
-        pt match {
-          case null => Right(())
-          case pt: tpd.Expr =>
-            compareTypes(tp, pt)
-        }
-    //   }
-    // }
+  def isMatchingTypes(tp: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] = trace.force(s"isMatchingTypes($tp, $pt)") {
+    pt match {
+      case null => Right(())
+      case pt: tpd.Expr =>
+        compareTypes(tp, pt)
+    }
+  }
 
   def typed(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
     val showPt = if pt eq null then "<null>" else pt.toString
     // println(s"typing $e, pt = $showPt")
-    typed1(e, pt) flatMap { e1 =>
-      isMatchingTypes(e1.tpe, pt).map(_ => e1)
+    trace.force(s"typing $e, pt = $showPt") {
+      typed1(e, pt) flatMap { e1 =>
+        isMatchingTypes(e1.tpe, pt).map(_ => e1)
+      }
     }
 
   def typed1(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] = e match
@@ -171,15 +175,6 @@ class Typer:
     case Type(l) => Right(tpd.Type(l))
     case _ => Left(s"not supported: typed($e)")
 
-  private def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr)(using Context): tpd.Expr =
-    val treeMap = new tpd.ExprMap:
-      override def mapValRef(e: tpd.ValRef): tpd.Expr =
-        if e.sym eq sym then target else super.mapValRef(e)
-      // override def apply(e: tpd.Expr): tpd.Expr =
-      //   println(s"abstracting symbol for $e")
-      //   super.apply(e)
-    treeMap(e)
-
   private def liftParamRefInType(from: tpd.PiIntroParamRef, to: tpd.PiTypeParamRef, tp: tpd.Expr): tpd.Expr =
     val treeMap = new tpd.ExprMap:
       // override def isDebugging: Boolean = true
@@ -197,7 +192,7 @@ class Typer:
           } flatMap { resTyp1 =>
             resTyp1.tpe match
               case tpd.Type(l2) =>
-                val l = l1 lub l2
+                val l = trace.force(s"typedPi: $l1 lub $l2") { l1 lub l2 }
                 val pref = tpd.PiTypeParamRef()
                 val resTyp2 = abstractSymbol(sym, pref, resTyp1)
                 val binder = tpd.PiType(argName, argTyp1, resTyp2).withType(tpd.Type(l))
@@ -295,7 +290,7 @@ class Typer:
     d match
       case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
       case ddef: DefDef => typedDefDef(ddef) map { info => ctx.addValInfo(info) }
-      case p: Commands.Normalise => typed(p.expr) map { te => println(te) }
+      case p: Commands.Normalise => typed(p.expr) map { te => println(normalise(te).show) }
       case _ => Left(s"unsupported: $d")
 
   def typedProgram(defs: List[Definition])(using Context): TyperResult[Unit] =
@@ -308,16 +303,20 @@ class Typer:
 object Typer:
   type TyperResult[+X] = Either[String, X]
 
-  def substBinder[T <: tpd.PiType | tpd.PiIntro](binder: T, to: tpd.Expr, expr: tpd.Expr)(using Context): tpd.Expr =
+  def substBinder[T <: tpd.PiType | tpd.PiIntro](binder: T, to: tpd.Expr, expr: tpd.Expr): tpd.Expr =
     val exprMap = new tpd.ExprMap:
       override def mapPiTypeParamRef(e: tpd.PiTypeParamRef): tpd.Expr =
-        if e.binder eq binder then to else super.mapPiTypeParamRef(e)
+        // println(s"!!! mapPiTypeParamRef ($binder --> $to) $e")
+        if e.binder == binder then to else super.mapPiTypeParamRef(e)
 
       override def mapPiIntroParamRef(e: tpd.PiIntroParamRef): tpd.Expr =
-        if e.binder eq binder then to else super.mapPiIntroParamRef(e)
+        // println(s"!!! mapPiIntroParamRef ($binder --> $to) $e")
+        // println(s"... e.binder: ${e.binder}")
+        // println(s"... binder: ${binder}")
+        if e.binder == binder then to else super.mapPiIntroParamRef(e)
     exprMap(expr)
 
-  def substBinder(name: String, to: Expr, expr: Expr)(using Context): Expr =
+  def substBinder(name: String, to: Expr, expr: Expr): Expr =
     def k(expr: Expr): Expr = substBinder(name, to, expr)
     expr match
       case Var(name1) => if name1 == name then to else Var(name1)
@@ -329,3 +328,12 @@ object Typer:
       case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, k(body)) })
       case Type(level) => expr
       case Wildcard => Wildcard
+
+  def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr): tpd.Expr =
+    val treeMap = new tpd.ExprMap:
+      override def mapValRef(e: tpd.ValRef): tpd.Expr =
+        if e.sym eq sym then target else super.mapValRef(e)
+      // override def apply(e: tpd.Expr): tpd.Expr =
+      //   println(s"abstracting symbol for $e")
+      //   super.apply(e)
+    treeMap(e)

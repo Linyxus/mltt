@@ -11,8 +11,13 @@ object TypedExprs {
       myTpe.nn
 
     def withType(tp: Expr): this.type =
+      withTypeUnchecked(tp)
+
+    def withTypeUnchecked(tp: Expr): this.type =
       myTpe = tp
       this
+
+    def show: String
   }
 
   trait ParamRef {
@@ -33,6 +38,8 @@ object TypedExprs {
       assert(false)
       this
     override def toString(): String = s"ValRef(${sym.name})"
+
+    def show: String = sym.name
   }
 
   case class PiType(argName: String, argTyp: Expr, resTyp: Expr) extends Expr {
@@ -44,6 +51,8 @@ object TypedExprs {
     def withType(): this.type = withType(computeType)
 
     override def toString(): String = s"PiType@${hashCode()}($argName, $argTyp, $resTyp)"
+
+    def show: String = s"(($argName: ${argTyp.show}) -> ${resTyp.show})"
   }
   case class PiTypeParamRef() extends Expr with ParamRef {
     type BinderType = PiType
@@ -56,6 +65,8 @@ object TypedExprs {
         s"<${binder.hashCode()}:${binder.argName}>"
       else
         "<unbound:∀>"
+
+    def show: String = binder.argName
   }
 
   case class PiIntro(argName: String, argTyp: Expr) extends Expr {
@@ -65,7 +76,9 @@ object TypedExprs {
       myBody = e
       this
 
-    override def toString(): String = s"PiIntro($argName, $argTyp, $body)"
+    override def toString(): String = s"PiIntro@${hashCode()}($argName, $argTyp, $body)"
+
+    def show: String = s"(($argName:${argTyp.show}) => ${body.show})"
   }
   case class PiIntroParamRef() extends Expr with ParamRef {
     type BinderType = PiIntro
@@ -77,12 +90,20 @@ object TypedExprs {
         s"<${binder.hashCode()}:${binder.argName}>"
       else
         "<unbound:λ>"
+
+    def show: String = binder.argName
   }
 
-  case class PiElim(func: Expr, arg: Expr) extends Expr
+  case class PiElim(func: Expr, arg: Expr) extends Expr {
+    def show: String = s"(${func.show} ${arg.show})"
+  }
 
-  case class AppliedTypeCon(tycon: TypeConSymbol, args: List[Expr]) extends Expr
-  case class AppliedDataCon(datacon: DataConSymbol, args: List[Expr]) extends Expr
+  case class AppliedTypeCon(tycon: TypeConSymbol, args: List[Expr]) extends Expr {
+    def show: String = s"${tycon.name}(${args.map(_.show).mkString(", ")})"
+  }
+  case class AppliedDataCon(datacon: DataConSymbol, args: List[Expr]) extends Expr {
+    def show: String = s"${datacon.name}(${args.map(_.show).mkString(", ")})"
+  }
 
   case class Pattern(datacon: DataConSymbol, args: List[String])
   case class CaseDef(pat: Pattern, body: Expr) {
@@ -96,6 +117,7 @@ object TypedExprs {
     val cases: List[CaseDef] = cases0(this)
 
     override def toString(): String = s"Match($scrutinee, $cases)"
+    def show: String = "MATCH"
   }
 
   case class PatternBoundParamRef(paramIdx: Int) extends Expr with ParamRef {
@@ -108,14 +130,20 @@ object TypedExprs {
       if hasBinder then
         binder.pat.args(paramIdx)
       else "<unbound:pattern>"
+
+     def show: String = binder.pat.args(paramIdx)
   }
   case class Type(level: Level) extends Expr {
     override def tpe: Expr =
       Type(Level.LSucc(level))
     override def withType(tp: Expr): this.type = assert(false)
+
+    def show: String = "Type"
   }
 
-  case class Wildcard() extends Expr
+  case class Wildcard() extends Expr {
+    def show: String = "_"
+  }
 
   trait ExprTraverser:
     def traverseSubtrees(e: Expr): Unit =
@@ -246,7 +274,7 @@ object TypedExprs {
 
     def mapWildcard(e: Wildcard): Expr = e.withType(this(e.tpe))
 
-    def apply(t: Expr): Expr = 
+    def apply(t: Expr): Expr =
       val result = t match
         case e @ ValRef(sym) => mapValRef(e)
         case e @ PiType(argName, argTyp, resTyp) =>

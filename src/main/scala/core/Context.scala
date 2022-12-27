@@ -4,7 +4,9 @@ class Context:
   import Context._
   import DataInfo._
   import ast._
+  import TypedExprs.ValRef
   import core.Symbols._
+  import evaluator.{EvalContext, Evaluator}
 
   private var dataInfos: List[TypeConInfo] = List.empty
 
@@ -18,6 +20,13 @@ class Context:
     freshCtx.valInfos = valInfos
     freshCtx.bindings = bindings
     freshCtx
+
+  def toEvalContext: EvalContext =
+    val ectx = new EvalContext
+    for info <- valInfos.reverse do
+      Evaluator.evalDef(info.sym, info.expr)(using ectx)
+    bindings.foreach((_, sym) => sym -> ValRef(sym))
+    ectx
 
   def withBinding[T](sym: ValSymbol)(op: Context ?=> T): T =
     val freshCtx = fresh
