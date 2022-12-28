@@ -28,6 +28,10 @@ case class Case() extends TokenType
 case class Def() extends TokenType
 case class Match() extends TokenType
 case class Println() extends TokenType
+case class ThreeQuestionMarks() extends TokenType
+
+// literals
+case class NatNum(i: Int) extends TokenType
 
 // newlines, indents
 case class NewLine() extends TokenType

@@ -133,7 +133,7 @@ class Typer:
         }
       case (tp1, tp2) => if tp1 == tp2 then Right(()) else Left(s"Type mismatch: $tp1 vs $tp2")
 
-  def isMatchingTypes(tp: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] = trace.force(s"isMatchingTypes($tp, $pt)") {
+  def isMatchingTypes(tp: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] = trace(s"isMatchingTypes($tp, $pt)") {
     pt match {
       case null => Right(())
       case pt: tpd.Expr =>
@@ -144,7 +144,7 @@ class Typer:
   def typed(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
     val showPt = if pt eq null then "<null>" else pt.toString
     // println(s"typing $e, pt = $showPt")
-    trace.force(s"typing $e, pt = $showPt") {
+    trace(s"typing $e, pt = $showPt") {
       typed1(e, pt) flatMap { e1 =>
         isMatchingTypes(e1.tpe, pt).map(_ => e1)
       }
@@ -172,8 +172,21 @@ class Typer:
         case Some(con) => typedApplyDataCon(con, args)
     case Pi(arg, typ, resTyp) => typedPi(arg, typ, resTyp)
     case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
-    case Type(l) => Right(tpd.Type(l))
+    case e @ Type(l) => typedType(e, pt)
+    case Level() => Right(tpd.Level())
+    case LZero() => Right(tpd.LZero())
+    case LSucc(l) =>
+      typed(l, tpd.Level()) map { l => tpd.LSucc(l) }
+    case LLub(e1, e2) =>
+      typed(e1, tpd.Level()) flatMap { l1 =>
+        typed(e2, tpd.Level()) map { l2 =>
+          tpd.LLub(l1, l2)
+        }
+      }
     case _ => Left(s"not supported: typed($e)")
+
+  def typedType(e: Type, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
+    typed(e.level, pt = tpd.Level()) map { l => tpd.Type(l) }
 
   private def liftParamRefInType(from: tpd.PiIntroParamRef, to: tpd.PiTypeParamRef, tp: tpd.Expr): tpd.Expr =
     val treeMap = new tpd.ExprMap:
@@ -192,7 +205,7 @@ class Typer:
           } flatMap { resTyp1 =>
             resTyp1.tpe match
               case tpd.Type(l2) =>
-                val l = trace.force(s"typedPi: $l1 lub $l2") { l1 lub l2 }
+                val l = tpd.LLub(l1, l2)
                 val pref = tpd.PiTypeParamRef()
                 val resTyp2 = abstractSymbol(sym, pref, resTyp1)
                 val binder = tpd.PiType(argName, argTyp1, resTyp2).withType(tpd.Type(l))
@@ -326,7 +339,11 @@ object Typer:
       case ApplyTypeCon(name, args) => ApplyTypeCon(name, args.map(k))
       case ApplyDataCon(name, args) => ApplyDataCon(name, args.map(k))
       case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, k(body)) })
-      case Type(level) => expr
+      case Type(level) => Type(k(level))
+      case Level() => expr
+      case LZero() => expr
+      case LSucc(pred) => LSucc(k(pred))
+      case LLub(l1, l2) => LLub(k(l1), k(l2))
       case Wildcard => Wildcard
 
   def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr): tpd.Expr =

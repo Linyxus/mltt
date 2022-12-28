@@ -69,6 +69,7 @@ class Tokenizer(source: String):
     "def" -> Def(),
     "match" -> Match(),
     "println" -> Println(),
+    "???" -> ThreeQuestionMarks(),
   )
 
   def expect(ch: Char): Boolean =
@@ -76,6 +77,11 @@ class Tokenizer(source: String):
       step()
       true
     else false
+
+  def scanNumber(): Unit =
+    while !isEof && peek.isDigit do step()
+    val num = source.substring(start, current).toInt
+    emitToken(NatNum(num))
 
   def scanNext(): Unit =
     if isEof then emitToken(EOF())
@@ -103,6 +109,7 @@ class Tokenizer(source: String):
               emitToken(Equal())
           case ':' => emitToken(Colon())
           case ',' => emitToken(Comma())
+          case ch if ch.isDigit => scanNumber()
           case _ => scanIdentifier()
         else emitToken(EOF())
 

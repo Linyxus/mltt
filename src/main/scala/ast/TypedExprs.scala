@@ -1,7 +1,7 @@
 package ast
 
 import core.Symbols._
-import ast.Level
+// import ast.Level
 
 object TypedExprs {
   sealed trait Expr {
@@ -45,7 +45,7 @@ object TypedExprs {
   case class PiType(argName: String, argTyp: Expr, resTyp: Expr) extends Expr {
     def computeType: Type =
       (argTyp.tpe, resTyp.tpe) match
-        case (Type(l1), Type(l2)) => Type(l1 lub l2)
+        case (Type(l1), Type(l2)) => Type(LLub(l1, l2))
         case _ => assert(false)
 
     def withType(): this.type = withType(computeType)
@@ -133,12 +133,42 @@ object TypedExprs {
 
      def show: String = binder.pat.args(paramIdx)
   }
-  case class Type(level: Level) extends Expr {
+
+  case class LZero() extends Expr {
+    override def tpe: Expr = Level()
+    override def withType(tp: Expr) = assert(false)
+
+    def show: String = s"lzero"
+  }
+
+  case class LSucc(pred: Expr) extends Expr {
+    override def tpe: Expr = Level()
+    override def withType(tp: Expr) = assert(false)
+
+    def show: String = s"lsuc(${pred.show})"
+  }
+
+  case class LLub(l1: Expr, l2: Expr) extends Expr {
+    override def tpe: Expr = Level()
+    override def withType(tp: Expr) = assert(false)
+
+    def show: String = s"(${l1.show} ⊔ ${l2.show})"
+  }
+
+  case class Level() extends Expr {
     override def tpe: Expr =
-      Type(Level.LSucc(level))
+      Type(LZero())
+    override def withType(tp: Expr) = assert(false)
+
+    def show: String = "Level"
+  }
+
+  case class Type(level: Expr) extends Expr {
+    override def tpe: Expr =
+      Type(LSucc(level))
     override def withType(tp: Expr): this.type = assert(false)
 
-    def show: String = "Type"
+    def show: String = s"Type(${level.show})"
   }
 
   case class Wildcard() extends Expr {
@@ -151,6 +181,7 @@ object TypedExprs {
         e match
           case e: ParamRef =>
             if e.hasBinder then traverse(e.tpe)
+          case Level() =>
           case _ =>
             traverse(e.tpe)
       e match
@@ -174,7 +205,14 @@ object TypedExprs {
             traverse(body)
           }
         case PatternBoundParamRef(paramIdx) => ()
-        case Type(level) => ()
+        case Type(level) =>
+          traverse(level)
+        case Level() => ()
+        case LZero() => ()
+        case LSucc(pred) => traverse(pred)
+        case LLub(l1, l2) =>
+          traverse(l1)
+          traverse(l2)
         case Wildcard() => ()
 
     def traverseValRef(e: ValRef): Unit =
@@ -202,6 +240,18 @@ object TypedExprs {
     def traverseType(e: Type): Unit =
       traverseSubtrees(e)
 
+    def traverseLevel(e: Level): Unit =
+      traverseSubtrees(e)
+
+    def traverseLZero(e: LZero): Unit =
+      traverseSubtrees(e)
+
+    def traverseLSucc(e: LSucc): Unit =
+      traverseSubtrees(e)
+
+    def traverseLLub(e: LLub): Unit =
+      traverseSubtrees(e)
+
     def traverseWildcard(e: Wildcard): Unit =
       traverseSubtrees(e)
 
@@ -217,6 +267,10 @@ object TypedExprs {
       case e @ Match(scrutinee, cases0) => traverseMatch(e)
       case e @ PatternBoundParamRef(paramIdx) => traversePatternBoundParamRef(e)
       case e @ Type(level) => traverseType(e)
+      case e @ Level() => traverseLevel(e)
+      case e @ LZero() => traverseLZero(e)
+      case e @ LSucc(_) => traverseLSucc(e)
+      case e @ LLub(_, _) => traverseLLub(e)
       case e @ Wildcard() => traverseWildcard(e)
 
   trait ExprMap:
@@ -272,6 +326,14 @@ object TypedExprs {
 
     def mapType(e: Type): Expr = e
 
+    def mapLevel(e: Level): Expr = e
+
+    def mapLZero(e: LZero): Expr = e
+
+    def mapLSucc(e: LSucc): Expr = LSucc(this(e.pred))
+
+    def mapLLub(e: LLub): Expr = LLub(this(e.l1), this(e.l2))
+
     def mapWildcard(e: Wildcard): Expr = e.withType(this(e.tpe))
 
     def apply(t: Expr): Expr =
@@ -289,6 +351,10 @@ object TypedExprs {
         case e @ Match(scrutinee, cases0) => mapMatch(e)
         case e @ PatternBoundParamRef(paramIdx) => mapPatternBoundParamRef(e)
         case e @ Type(level) => mapType(e)
+        case e @ Level() => mapLevel(e)
+        case e @ LZero() => mapLZero(e)
+        case e @ LSucc(_) => mapLSucc(e)
+        case e @ LLub(_, _) => mapLLub(e)
         case e @ Wildcard() => mapWildcard(e)
       if isDebugging then
         println(s"ExprMap: map $t --> $result")

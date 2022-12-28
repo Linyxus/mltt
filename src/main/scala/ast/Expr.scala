@@ -10,6 +10,10 @@ sealed trait Expr {
     case ApplyDataCon(name, args) => s"$name(${args.map(_.toString).mkString(", ")})"
     case Match(scrutinee, cases) => s"($scrutinee) match (${cases.map(_.toString).mkString("; ")})"
     case Type(level) => s"Type($level)"
+    case Level() => s"Level"
+    case LZero() => s"lzero"
+    case LSucc(pred) => s"lsucc($pred)"
+    case LLub(l1, l2) => s"$l1 ⊔ $l2"
     case Wildcard => "_"
 }
 
@@ -29,18 +33,26 @@ case class CaseDef(pat: ApplyDataCon, body: Expr)
 
 case class Match(scrutinee: Expr, cases: List[CaseDef]) extends Expr
 
-enum Level {
-  case LZero
-  case LSucc(pred: Level)
+case class Level() extends Expr
 
-  def lub(other: Level): Level =
-    (this, other) match
-      case (LZero, b) => b
-      case (a, LZero) => a
-      case (LSucc(a), LSucc(b)) => LSucc(a lub b)
-}
+case class LZero() extends Expr
 
-case class Type(level: Level) extends Expr
+case class LSucc(pred: Expr) extends Expr
+
+case class LLub(e1: Expr, e2: Expr) extends Expr
+
+// enum Level {
+//   case LZero
+//   case LSucc(pred: Level)
+
+//   def lub(other: Level): Level =
+//     (this, other) match
+//       case (LZero, b) => b
+//       case (a, LZero) => a
+//       case (LSucc(a), LSucc(b)) => LSucc(a lub b)
+// }
+
+case class Type(level: Expr) extends Expr
 
 case object Wildcard extends Expr
 

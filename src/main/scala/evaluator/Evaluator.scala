@@ -30,7 +30,10 @@ object Evaluator:
       case PiElim(func, arg) => evalApply(eval(func), eval(arg))
       case AppliedTypeCon(tycon, args) => AppliedType(tycon, args.map(eval(_)))
       case AppliedDataCon(datacon, args) => AppliedData(datacon, args.map(eval(_)))
-      case Type(level) => TypeValue(level)
+      case Type(level) => TypeValue(eval(level))
+      case LZero() => LZeroVal()
+      case LSucc(e) => LSuccVal(eval(e))
+      case LLub(l1, l2) => evalLevelLub(eval(l1), eval(l2))
       case _ => assert(false, s"non-supported: $e")
     res.withType(e.tpe)
 
@@ -44,6 +47,14 @@ object Evaluator:
         val tpe: Expr = Typer.substBinder(tp, readBack(arg), resTyp)
         NeutralValue(Neutral.Apply(nv, arg)).withType(tpe)
       case _ => assert(false, fun)
+
+  def evalLevelLub(l1: Value, l2: Value): Value =
+    (l1, l2) match
+      case (LZeroVal(), r) => r
+      case (l, LZeroVal()) => l
+      case (LSuccVal(l), LSuccVal(r)) => LSuccVal(evalLevelLub(l, r)).withType(Level())
+      case (l: (NeutralValue | LevelVal), r: (NeutralValue | LevelVal)) => NeutralValue(Neutral.LevelLub(l, r)).withType(Level())
+      case _ => assert(false, (l1, l2))
 
   def readBack(value: Value): Expr = trace(s"readBack($value) with ${value.tpe}") {
     (value.tpe, value) match
@@ -68,6 +79,8 @@ object Evaluator:
         pref.overwriteBinder(pi)
         pi
       case (tp, NeutralValue(neu)) => readBack(neu, tp)
+      case (tp, LZeroVal()) => LZero().withTypeUnchecked(tp)
+      case (tp, LSuccVal(e)) => LSucc(readBack(e)).withTypeUnchecked(tp)
       case _ => assert(false, value)
   }
 
@@ -76,7 +89,13 @@ object Evaluator:
       case Neutral.Var(sym) => ValRef(sym)
       case Neutral.Apply(fun, arg) =>
         PiElim(readBack(fun.neutral, fun.tpe), readBack(arg)).withType(tp)
+      case Neutral.LevelLub(l1, l2) =>
+        LLub(readBackLevel(l1), readBackLevel(l2))
   }
+
+  def readBackLevel(l: NeutralValue | LevelVal): Expr = l match
+    case nv: NeutralValue => readBack(nv.neutral, nv.tpe)
+    case nv: LevelVal => readBack(nv)
 
   def normalise(e: Expr)(using EvalContext): Expr =
     readBack(eval(e))

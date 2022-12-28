@@ -131,10 +131,43 @@ class Parser(source: String):
 
   def parseType: ParseResult[Expr] =
     step()
-    Right(Type(Level.LZero))
+    if peekType != LeftParen() then
+      Right(Type(LZero()))
+    else
+      matchAhead(LeftParen()) flatMap { _ =>
+        parseExpr flatMap { level =>
+          matchAhead(RightParen()) map { _ =>
+            Type(level)
+          }
+        }
+      }
+      Right(Type(LZero()))
+
+  def parseLSucc: ParseResult[Expr] =
+    step()
+    matchAhead(LeftParen()) flatMap { _ =>
+      parseExpr flatMap { x =>
+        matchAhead(RightParen()) map { _ => LSucc(x) }
+      }
+    }
+
+  def parseLLub: ParseResult[Expr] =
+    step()
+    parseParamList flatMap {
+      case p1 :: p2 :: Nil => Right(LLub(p1, p2))
+      case _ => Left(s"`lub` has to be applied to two arguments")
+    }
 
   def parseExprAtom: ParseResult[Expr] = peekType match
     case Ident(name) if name == "Type" => parseType
+    case Ident(name) if name == "Level" =>
+      step()
+      Right(Level())
+    case Ident(name) if name == "lzero" =>
+      step()
+      Right(LZero())
+    case Ident(name) if name == "lsuc" => parseLSucc
+    case Ident(name) if name == "lub" => parseLLub
     case Ident(name) => varOrPiIntro
     case LeftParen() => parsePi
     case ErrorToken(msg) => Left(s"tokeniaztion error: $msg")

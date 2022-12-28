@@ -33,7 +33,7 @@ def example(): Unit = {
 
   val def4 = DataDef(
     "Nat",
-    Type(LZero),
+    Type(LZero()),
     List(
       ConsDef("zero", ApplyTypeCon("Nat", Nil)),
       ConsDef("suc", Pi("pred", ApplyTypeCon("Nat", Nil), ApplyTypeCon("Nat", Nil))),
@@ -222,45 +222,71 @@ def typerExample(): Unit =
 // println(l2)
        """
 def zero(
-  A: Type,
+  l: Level,
+  A: Type(l),
   f: (x: A) -> A,
   x: A
 ): A = x
 def succ(
-  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
-  A: Type,
+  n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+  l: Level,
+  A: Type(l),
   f: (x: A) -> A,
   x: A
-): A = f(n(A, f, x))
+): A = f(n(l, A, f, x))
 
 println(zero)
 println(succ(zero))
 println(succ(succ(zero)))
 
 def add(
-  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
-  m: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
-  A: Type,
+  n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+  m: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+  l: Level,
+  A: Type(l),
   f: (x: A) -> A,
   x: A
-): A = m(A, f, n(A, f, x))
-def one: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A = succ(zero)
-def two: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A = succ(one)
-def three: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A = add(two, one)
+): A = m(l, A, f, n(l, A, f, x))
+def one: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = succ(zero)
+def two: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = succ(one)
+def three: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = add(two, one)
 
-def mult(
-  n: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
-  m: (A: Type) -> (f: (x: A) -> A) -> (x: A) -> A,
-  A: Type,
-  f: (x: A) -> A,
-  x: A
-): A = n((A: Type) -> (f: (x: A) -> A) -> (x: A) -> A, add(m), zero)
+println(add(three, three))
+
 """ :: Nil
+
+// def mult(
+//   n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+//   m: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+//   l: Level,
+//   A: Type(l),
+//   f: (x: A) -> A,
+//   x: A
+// ): A = n(lsuc(l), (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A, add(m), zero)
+
+//   """
+// def f1(x: Level): Level = x
+// def f2: Level = lzero
+// def x3: Level = f1(f2)
+// def f4(x: Level): Level = lsuc(x)
+// def f5: Level  = f4(f4(f4(f1(f2))))
+// def f6(x: Level, y: Level): Level = lub(x, y)
+// def f7(l: Level, A: Type(l), x: A): A = x
+
+// println(f1)
+// println(f2)
+// println(x3)
+// println(f4)
+// println(f5)
+// println(f6)
+// println(f7)
+// """ :: Nil
   for prog <- progs do
     println("==========")
     println(prog)
     println("----------")
     val x = Parser.parseProgram(prog)
+    if !x.isRight then println(x)
     // println(x)
     x map { defs =>
       // println(s"* parsed defs: $defs")
