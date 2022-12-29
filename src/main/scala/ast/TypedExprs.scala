@@ -105,7 +105,7 @@ object TypedExprs {
     def show: String = s"${datacon.name}(${args.map(_.show).mkString(", ")})"
   }
 
-  case class Pattern(datacon: DataConSymbol, args: List[String])
+  case class Pattern(datacon: DataConSymbol, argNames: List[String], argTyps: List[Expr])
   case class CaseDef(pat: Pattern, body: Expr) {
     private var myPatMat: Match | Null = null
     def patmat: Match = myPatMat.nn
@@ -113,8 +113,15 @@ object TypedExprs {
       myPatMat = patmat
       this
   }
-  case class Match(scrutinee: Expr, cases0: Match => List[CaseDef]) extends Expr {
-    val cases: List[CaseDef] = cases0(this)
+  case class Match(scrutinee: Expr) extends Expr {
+    private var myCases: List[CaseDef] | Null = null
+    def cases: List[CaseDef] = myCases.nn
+    def setCases(cdefs: List[CaseDef]): this.type =
+      def checkCase(cdef: CaseDef): Unit = assert(cdef.pat eq this)
+      cdefs.foreach(checkCase)
+      assert(myCases eq null)
+      myCases = cdefs
+      this
 
     override def toString(): String = s"Match($scrutinee, $cases)"
     def show: String = "MATCH"
@@ -123,15 +130,15 @@ object TypedExprs {
   case class PatternBoundParamRef(paramIdx: Int) extends Expr with ParamRef {
     type BinderType = CaseDef
     override def tpe: Expr =
-      binder.pat.datacon.info.paramTypeOf(paramIdx)
+      binder.pat.argTyps(paramIdx)
     override def withType(tp: Expr): this.type = assert(false)
 
     override def toString(): String =
       if hasBinder then
-        binder.pat.args(paramIdx)
+        binder.pat.argNames(paramIdx)
       else "<unbound:pattern>"
 
-     def show: String = binder.pat.args(paramIdx)
+     def show: String = binder.pat.argNames(paramIdx)
   }
 
   case class LZero() extends Expr {
@@ -199,11 +206,9 @@ object TypedExprs {
           args.foreach(traverse)
         case AppliedDataCon(datacon, args) =>
           args.foreach(traverse)
-        case e @ Match(scrutinee, _) =>
+        case e @ Match(scrutinee) =>
           traverse(scrutinee)
-          e.cases.foreach { case CaseDef(_, body) =>
-            traverse(body)
-          }
+          e.cases.foreach(traverseCaseDef)
         case PatternBoundParamRef(paramIdx) => ()
         case Type(level) =>
           traverse(level)
@@ -214,6 +219,16 @@ object TypedExprs {
           traverse(l1)
           traverse(l2)
         case Wildcard() => ()
+
+    def traverseSubtrees(cdef: CaseDef): Unit =
+      traversePattern(cdef.pat)
+      traverse(cdef.body)
+
+    def traverseCaseDef(cdef: CaseDef): Unit =
+      traverseSubtrees(cdef)
+
+    def traversePattern(pat: Pattern): Unit =
+      pat.argTyps.foreach(traverse)
 
     def traverseValRef(e: ValRef): Unit =
       traverseSubtrees(e)
@@ -264,7 +279,7 @@ object TypedExprs {
       case e @ PiElim(func, arg) => traversePiElim(e)
       case e @ AppliedTypeCon(tycon, args) => traverseAppliedTypeCon(e)
       case e @ AppliedDataCon(datacon, args) => traverseAppliedDataCon(e)
-      case e @ Match(scrutinee, cases0) => traverseMatch(e)
+      case e @ Match(scrutinee) => traverseMatch(e)
       case e @ PatternBoundParamRef(paramIdx) => traversePatternBoundParamRef(e)
       case e @ Type(level) => traverseType(e)
       case e @ Level() => traverseLevel(e)
@@ -288,6 +303,14 @@ object TypedExprs {
         override def traversePiIntroParamRef(e: PiIntroParamRef): Unit =
           if e.hasBinder && (e.binder eq old) then e.overwriteBinder(neo)
           traverseSubtrees(e)
+      traverser.traverse(e)
+
+    private def updatePatternBoundParamRef(old: CaseDef, neo: CaseDef, e: Expr): Unit =
+      val traverser = new ExprTraverser:
+        override def traversePatternBoundParamRef(e: PatternBoundParamRef): Unit =
+          if e.hasBinder && (e.binder eq old) then e.overwriteBinder(neo)
+          traverseSubtrees(e)
+      traverser.traverse(e)
 
     def mapValRef(e: ValRef): Expr = e
 
@@ -314,12 +337,19 @@ object TypedExprs {
     def mapAppliedDataCon(e: AppliedDataCon): Expr =
       AppliedDataCon(e.datacon, e.args.map(this(_))).withType(this(e.tpe))
 
+    def mapPattern(pat: Pattern): Pattern =
+      Pattern(pat.datacon, pat.argNames, pat.argTyps.map(this(_)))
+
     def mapCaseDef(pm: Match, cdef: CaseDef): CaseDef =
-      CaseDef(cdef.pat, this(cdef.body)).overwritePatMat(pm)
+      val res = CaseDef(mapPattern(cdef.pat), this(cdef.body)).overwritePatMat(pm)
+      updatePatternBoundParamRef(cdef, res, res.body)
+      res.pat.argTyps.foreach(updatePatternBoundParamRef(cdef, res, _))
+      res
 
     def mapMatch(e: Match): Expr =
-      val res = Match(this(e.scrutinee), patmat => e.cases.map(mapCaseDef(patmat, _)))
-      res.withType(this(e.tpe))
+      val res = Match(this(e.scrutinee))
+      val cases1 = e.cases.map(cdef => mapCaseDef(res, cdef))
+      res.setCases(cases1).withType(this(e.tpe))
 
     def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
       e
@@ -348,7 +378,7 @@ object TypedExprs {
         case e @ PiElim(func, arg) => mapPiElim(e)
         case e @ AppliedTypeCon(tycon, args) => mapAppliedTypeCon(e)
         case e @ AppliedDataCon(datacon, args) => mapAppliedDataCon(e)
-        case e @ Match(scrutinee, cases0) => mapMatch(e)
+        case e @ Match(scrutinee) => mapMatch(e)
         case e @ PatternBoundParamRef(paramIdx) => mapPatternBoundParamRef(e)
         case e @ Type(level) => mapType(e)
         case e @ Level() => mapLevel(e)

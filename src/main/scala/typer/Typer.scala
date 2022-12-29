@@ -172,6 +172,7 @@ class Typer:
         case Some(con) => typedApplyDataCon(con, args)
     case Pi(arg, typ, resTyp) => typedPi(arg, typ, resTyp)
     case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
+    case e @ Match(scrutinee, cases) => typedMatch(e, pt)
     case e @ Type(l) => typedType(e, pt)
     case Level() => Right(tpd.Level())
     case LZero() => Right(tpd.LZero())
@@ -241,6 +242,8 @@ class Typer:
           }
         }
       case _ => Left(s"cannot type function with expected type $pt")
+
+  def typedMatch(e: Match, pt: tpd.Expr | Null): TyperResult[tpd.Expr] = ???
 
   def collectAll[X](xs: List[TyperResult[X]]): TyperResult[List[X]] = xs match
     case Nil => Right(Nil)
