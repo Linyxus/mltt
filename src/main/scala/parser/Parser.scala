@@ -159,6 +159,9 @@ class Parser(source: String):
     }
 
   def parseExprAtom: ParseResult[Expr] = peekType match
+    case ThreeQuestionMarks() =>
+      step()
+      Right(Undefined())
     case Ident(name) if name == "Type" => parseType
     case Ident(name) if name == "Level" =>
       step()

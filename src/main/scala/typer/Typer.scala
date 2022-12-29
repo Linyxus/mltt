@@ -102,12 +102,12 @@ class Typer:
       case Some(_) => Left(s"already defined: ${ddef.name}")
       case None =>
         typed(ddef.typ) flatMap { sig =>
-          val sym = ValDefSymbol(ddef.name)
-          val dummy = ValInfo(sym, sig, tpd.Wildcard())
-          sym.overwriteValInfo(dummy)
-          ctx.withValInfo(dummy) {
+          val dummySym = ParamSymbol(ddef.name, sig)
+          ctx.withBinding(dummySym) {
             typed(ddef.body, sig) map { body =>
-              val res = ValInfo(sym, sig, body)
+              val sym = ValDefSymbol(ddef.name)
+              val body1 = abstractSymbol(dummySym, tpd.ValRef(sym), body)
+              val res = ValInfo(sym, sig, body1)
               sym.overwriteValInfo(res)
               res
             }
@@ -137,7 +137,7 @@ class Typer:
     pt match {
       case null => Right(())
       case pt: tpd.Expr =>
-        compareTypes(tp, pt)
+        compareTypes(normalise(tp), normalise(pt))
     }
   }
 
@@ -183,6 +183,14 @@ class Typer:
           tpd.LLub(l1, l2)
         }
       }
+    case Undefined() =>
+      if pt == null then
+        Left(s"cannot type ??? w/o an expected type")
+      else
+        println(s"Goal: ${normalise(pt).show}")
+        println(s"=====================")
+        println(ctx.description(e => normalise(e).show))
+        Right(tpd.Wildcard().withType(pt))
     case _ => Left(s"not supported: typed($e)")
 
   def typedType(e: Type, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
@@ -344,6 +352,7 @@ object Typer:
       case LZero() => expr
       case LSucc(pred) => LSucc(k(pred))
       case LLub(l1, l2) => LLub(k(l1), k(l2))
+      case Undefined() => Undefined()
       case Wildcard => Wildcard
 
   def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr): tpd.Expr =

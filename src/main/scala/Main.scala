@@ -220,40 +220,40 @@ def typerExample(): Unit =
 
 // def l2: List(Nat()) = Cons(Nat(), zero, l1)
 // println(l2)
-       """
-def zero(
-  l: Level,
-  A: Type(l),
-  f: (x: A) -> A,
-  x: A
-): A = x
-def succ(
-  n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
-  l: Level,
-  A: Type(l),
-  f: (x: A) -> A,
-  x: A
-): A = f(n(l, A, f, x))
+//        """
+// def zero(
+//   l: Level,
+//   A: Type(l),
+//   f: (x: A) -> A,
+//   x: A
+// ): A = x
+// def succ(
+//   n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+//   l: Level,
+//   A: Type(l),
+//   f: (x: A) -> A,
+//   x: A
+// ): A = f(n(l, A, f, x))
 
-println(zero)
-println(succ(zero))
-println(succ(succ(zero)))
+// println(zero)
+// println(succ(zero))
+// println(succ(succ(zero)))
 
-def add(
-  n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
-  m: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
-  l: Level,
-  A: Type(l),
-  f: (x: A) -> A,
-  x: A
-): A = m(l, A, f, n(l, A, f, x))
-def one: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = succ(zero)
-def two: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = succ(one)
-def three: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = add(two, one)
+// def add(
+//   n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+//   m: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
+//   l: Level,
+//   A: Type(l),
+//   f: (x: A) -> A,
+//   x: A
+// ): A = m(l, A, f, n(l, A, f, x))
+// def one: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = succ(zero)
+// def two: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = succ(one)
+// def three: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A = add(two, one)
 
-println(add(three, three))
+// println(add(three, three))
 
-""" :: Nil
+// """ :: Nil
 
 // def mult(
 //   n: (l: Level) -> (A: Type(l)) -> (f: (x: A) -> A) -> (x: A) -> A,
@@ -281,6 +281,25 @@ println(add(three, three))
 // println(f6)
 // println(f7)
 // """ :: Nil
+  """
+enum Prod(A: Type, B: (a: A) -> Type) extends Type:
+  case Pair(A: Type, B: (a: A) -> Type, a: A, b: B(a)) extends Prod(A, B)
+
+enum Nat extends Type:
+  case Zero() extends Nat()
+  case Succ(n: Nat()) extends Nat()
+def Nat: Type = Nat()
+
+enum Vec(A: Type, l: Nat) extends Type:
+  case Nil(A: Type) extends Vec(A, Zero())
+  case Cons(A: Type, l: Nat, head: A, tail: Vec(A, l)) extends Vec(A, Succ(l))
+
+def List(A: Type): Type =
+  Prod(Nat, l => Vec(A, l))
+
+def nil(A: Type): List(A) =
+  Pair(Nat, l => Vec(A, l), Zero(), Nil(A))
+""" :: Nil
   for prog <- progs do
     println("==========")
     println(prog)

@@ -19,7 +19,7 @@ object Evaluator:
         assert(res.isDefined, s"non-defined sym: $sym, eval context: $ctx")
         res.get
       case binder @ PiType(argName, argTyp, resTyp) =>
-        val sym = ParamSymbol(argName, argTyp)
+        val sym = ParamSymbol(argName, normalise(argTyp))
         val resTyp1 = Typer.substBinder(binder, ValRef(sym), resTyp)
         val closure = Closure(ctx.fresh, sym, resTyp1)
         PiValue(closure)
@@ -34,6 +34,8 @@ object Evaluator:
       case LZero() => LZeroVal()
       case LSucc(e) => LSuccVal(eval(e))
       case LLub(l1, l2) => evalLevelLub(eval(l1), eval(l2))
+      case Wildcard() => NeutralValue(Neutral.Wildcard())
+      case Level() => LevelValue()
       case _ => assert(false, s"non-supported: $e")
     res.withType(e.tpe)
 
@@ -81,11 +83,14 @@ object Evaluator:
       case (tp, NeutralValue(neu)) => readBack(neu, tp)
       case (tp, LZeroVal()) => LZero().withTypeUnchecked(tp)
       case (tp, LSuccVal(e)) => LSucc(readBack(e)).withTypeUnchecked(tp)
+      case (tp, TypeValue(l)) => Type(readBack(l))
+      case (tp, LevelValue()) => Level()
       case _ => assert(false, value)
   }
 
   def readBack(neu: Neutral, tp: Expr): Expr = trace(s"readBack($neu) with $tp") {
     neu match
+      case Neutral.Wildcard() => Wildcard().withType(tp)
       case Neutral.Var(sym) => ValRef(sym)
       case Neutral.Apply(fun, arg) =>
         PiElim(readBack(fun.neutral, fun.tpe), readBack(arg)).withType(tp)

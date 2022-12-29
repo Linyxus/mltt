@@ -22,6 +22,7 @@ object Value:
 
   case class NeutralValue(neutral: Neutral) extends Value
 
+  case class LevelValue() extends Value
   sealed trait LevelVal extends Value
   case class LZeroVal() extends LevelVal
   case class LSuccVal(pred: Value) extends LevelVal
@@ -30,6 +31,7 @@ object Value:
 
   sealed trait Neutral
   object Neutral:
+    case class Wildcard() extends Neutral
     case class Var(sym: ValSymbol) extends Neutral
     case class Apply(fun: NeutralValue, arg: Value) extends Neutral
     case class LevelLub(l: NeutralValue | LevelVal, r: NeutralValue | LevelVal) extends Neutral

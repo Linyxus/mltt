@@ -6,7 +6,8 @@ class Context:
   import ast._
   import TypedExprs.ValRef
   import core.Symbols._
-  import evaluator.{EvalContext, Evaluator}
+  import evaluator.{EvalContext, Evaluator, Value}
+  import Value._
 
   private var dataInfos: List[TypeConInfo] = List.empty
 
@@ -25,8 +26,15 @@ class Context:
     val ectx = new EvalContext
     for info <- valInfos.reverse do
       Evaluator.evalDef(info.sym, info.expr)(using ectx)
-    bindings.foreach((_, sym) => sym -> ValRef(sym))
+    bindings.foreach((_, sym) => ectx.addBinding(sym, NeutralValue(Neutral.Var(sym)).withType(sym.info)))
     ectx
+
+  def description(showOp: TypedExprs.Expr => String): String =
+    val sb = StringBuilder()
+    bindings.foreach { (_, sym) =>
+      sb ++= s"${sym.name} : ${showOp(sym.info)}\n"
+    }
+    sb.result
 
   def withBinding[T](sym: ValSymbol)(op: Context ?=> T): T =
     val freshCtx = fresh
