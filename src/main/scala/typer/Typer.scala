@@ -8,6 +8,7 @@ import ast.TypedExprs.PiTypeParamRef
 import ast.TypedExprs.PiIntroParamRef
 import evaluator.{EvalContext, Evaluator}
 import utils.trace
+import ast.TypedExprs.PatternBoundParamRef
 
 class Typer:
   import Typer._
@@ -243,7 +244,62 @@ class Typer:
         }
       case _ => Left(s"cannot type function with expected type $pt")
 
-  def typedMatch(e: Match, pt: tpd.Expr | Null): TyperResult[tpd.Expr] = ???
+  def typedMatch(e: Match, pt: tpd.Expr | Null)(using Context): TyperResult[tpd.Expr] =
+    typed(e.scrutinee, pt) flatMap { scrutinee =>
+      normalise(scrutinee.tpe) match
+        case scrutTyp @ tpd.AppliedTypeCon(tycon, args) =>
+          def typedPattern(pat: ApplyDataCon): TyperResult[(tpd.AppliedDataCon, List[ParamSymbol])] =
+            ctx.lookupDataConInfo(pat.name, Some(tycon.name)) match
+              case Some(dcon) =>
+                @annotation.tailrec def recur(args: List[Expr], accTyp: tpd.Expr, acc: List[ParamSymbol]): TyperResult[(tpd.AppliedDataCon, List[ParamSymbol])] =
+                  args match
+                    case Nil => accTyp match
+                      case tpe: tpd.AppliedTypeCon =>
+                        val args = acc.reverse.map(tpd.ValRef(_))
+                        Right((tpd.AppliedDataCon(dcon.symbol, args).withType(tpe), acc.reverse))
+                      case tp => Left(s"incorrect number of arguments in pattern $pat")
+                    case Var(name) :: args => accTyp match
+                      case binder @ tpd.PiType(argName, argTyp, resTyp) =>
+                        val sym = ParamSymbol(name, argTyp)
+                        val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
+                        recur(args, nextTyp, sym :: acc)
+                      case other => Left(s"incorrect number of arguments in pattern $pat")
+                    case exp :: args => Left(s"ill-formed pattern: $pat")
+                recur(pat.args, dcon.sig, Nil)
+              case None => Left(s"unknown data constructor ${pat.name}")
+          def typedCase(cdef: CaseDef): TyperResult[tpd.CaseDef] = typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
+            ctx.withBindings(paramSyms) {
+              typed(cdef.body, pt = pt) map { body =>
+                val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
+                val mapping: Map[ValSymbol, PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+                val substitutor = new tpd.ExprMap:
+                  override def mapValRef(e: tpd.ValRef): tpd.Expr =
+                    mapping.get(e.sym) match
+                      case None => super.mapValRef(e)
+                      case Some(pref) => pref
+                val body1 = substitutor(body)
+                val argTyps = paramSyms.map(sym => substitutor(sym.info))
+                val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
+                tpd.CaseDef(resPat, body1)
+              }
+            }
+          }
+          collectAll(e.cases.map(typedCase)).flatMap { cases =>
+            val res = tpd.Match(scrutinee)
+            cases.foreach(_.overwritePatMat(res))
+            val datacons = cases.map(_.pat.datacon)
+            val allDataCons = tycon.info.constructors.map(_.symbol)
+            val missing = allDataCons.filter(sym =>
+              !datacons.exists(x => x.name == sym.name)
+            )
+            if missing.isEmpty then
+              res.setCases(cases)
+              Right(res.withType(pt))
+            else
+              Left(s"missing cases: $missing")
+          }
+        case other => Left(s"cannot pattern match $scrutinee of type $other")
+    }
 
   def collectAll[X](xs: List[TyperResult[X]]): TyperResult[List[X]] = xs match
     case Nil => Right(Nil)

@@ -41,6 +41,11 @@ class Context:
     freshCtx.bindings = bindings + (sym.name -> sym)
     op(using freshCtx)
 
+  def withBindings[T](syms: List[ValSymbol])(op: Context ?=> T): T =
+    val freshCtx = fresh
+    freshCtx.bindings = bindings ++ (syms.map(sym => sym.name -> sym))
+    op(using freshCtx)
+
   def withDataInfo[T](info: TypeConInfo)(op: Context ?=> T): T =
     val freshCtx = fresh
     freshCtx.addDataInfo(info)

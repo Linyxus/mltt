@@ -309,6 +309,8 @@ def Nat: Type = Nat()
 def add(a: Nat, b: Nat): Nat = a match
   case Zero() => b
   case Succ(a) => Succ(add(a, b))
+
+println(add(Zero(), Succ(Zero())))
 """ :: Nil
   for prog <- progs do
     println("==========")

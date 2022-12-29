@@ -117,7 +117,7 @@ object TypedExprs {
     private var myCases: List[CaseDef] | Null = null
     def cases: List[CaseDef] = myCases.nn
     def setCases(cdefs: List[CaseDef]): this.type =
-      def checkCase(cdef: CaseDef): Unit = assert(cdef.pat eq this)
+      def checkCase(cdef: CaseDef): Unit = assert(cdef.patmat eq this)
       cdefs.foreach(checkCase)
       assert(myCases eq null)
       myCases = cdefs
@@ -189,6 +189,7 @@ object TypedExprs {
           case e: ParamRef =>
             if e.hasBinder then traverse(e.tpe)
           case Level() =>
+          case ValRef(sym: ValDefSymbol) if !sym.isDefined =>
           case _ =>
             traverse(e.tpe)
       e match

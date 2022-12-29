@@ -44,7 +44,11 @@ object Symbols {
 
     private var myDef: ValInfo | Null = null
     def overwriteValInfo(info: ValInfo): Unit = myDef = info
-    def dealias: ValInfo = myDef.nn
+    def dealias: ValInfo =
+      assert(myDef ne null, s"ValDefSymbol $this does not have an info")
+      myDef.nn
+
+    def isDefined: Boolean = myDef ne null
   }
 
   case class TypeConSymbol() extends DefSymbol with DelayedInfo {
