@@ -6,7 +6,7 @@ import ast.{TypedExprs => tpd}
 import Symbols._
 import ast.TypedExprs.PiTypeParamRef
 import ast.TypedExprs.PiIntroParamRef
-import evaluator.{EvalContext, Evaluator}
+import evaluator.{EvalContext, Evaluator, Reducer}
 import utils.trace
 import ast.TypedExprs.PatternBoundParamRef
 
@@ -21,7 +21,8 @@ class Typer:
     case _ => Left(s"not supported: isType($e)")
 
   def normalise(e: tpd.Expr)(using Context): tpd.Expr =
-    Evaluator.normalise(e)(using ctx.toEvalContext)
+    // Evaluator.normalise(e)(using ctx.toEvalContext)
+    Reducer.reduce(e)
 
   def typedDataDef(ddef: DataDef)(using Context): TyperResult[TypeConInfo] =
     def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
@@ -245,7 +246,7 @@ class Typer:
       case _ => Left(s"cannot type function with expected type $pt")
 
   def typedMatch(e: Match, pt: tpd.Expr | Null)(using Context): TyperResult[tpd.Expr] =
-    typed(e.scrutinee, pt) flatMap { scrutinee =>
+    typed(e.scrutinee) flatMap { scrutinee =>
       normalise(scrutinee.tpe) match
         case scrutTyp @ tpd.AppliedTypeCon(tycon, args) =>
           def typedPattern(pat: ApplyDataCon): TyperResult[(tpd.AppliedDataCon, List[ParamSymbol])] =
@@ -280,7 +281,9 @@ class Typer:
                 val body1 = substitutor(body)
                 val argTyps = paramSyms.map(sym => substitutor(sym.info))
                 val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
-                tpd.CaseDef(resPat, body1)
+                val res = tpd.CaseDef(resPat, body1)
+                prefs.foreach(_.overwriteBinder(res))
+                res
               }
             }
           }
@@ -370,7 +373,9 @@ class Typer:
     d match
       case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
       case ddef: DefDef => typedDefDef(ddef) map { info => ctx.addValInfo(info) }
-      case p: Commands.Normalise => typed(p.expr) map { te => println(normalise(te).show) }
+      case p: Commands.Normalise => typed(p.expr) map { te =>
+        println(Reducer.reduce(te).show)
+      }
       case _ => Left(s"unsupported: $d")
 
   def typedProgram(defs: List[Definition])(using Context): TyperResult[Unit] =
@@ -387,13 +392,13 @@ object Typer:
     val exprMap = new tpd.ExprMap:
       override def mapPiTypeParamRef(e: tpd.PiTypeParamRef): tpd.Expr =
         // println(s"!!! mapPiTypeParamRef ($binder --> $to) $e")
-        if e.binder == binder then to else super.mapPiTypeParamRef(e)
+        if e.binder.exprId == binder.exprId then to else super.mapPiTypeParamRef(e)
 
       override def mapPiIntroParamRef(e: tpd.PiIntroParamRef): tpd.Expr =
         // println(s"!!! mapPiIntroParamRef ($binder --> $to) $e")
         // println(s"... e.binder: ${e.binder}")
         // println(s"... binder: ${binder}")
-        if e.binder == binder then to else super.mapPiIntroParamRef(e)
+        if e.binder.exprId == binder.exprId then to else super.mapPiIntroParamRef(e)
     exprMap(expr)
 
   def substBinder(name: String, to: Expr, expr: Expr): Expr =

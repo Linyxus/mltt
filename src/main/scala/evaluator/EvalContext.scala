@@ -14,6 +14,13 @@ class EvalContext:
     store = saved
     result
 
+  def withBindings[T](bindings: List[(ValSymbol, Value)])(op: => T): T =
+    val saved = store
+    store = store ++ bindings
+    val result = op
+    store = saved
+    result
+
   def fresh: EvalContext =
     val freshCtx = new EvalContext
     freshCtx.store = store

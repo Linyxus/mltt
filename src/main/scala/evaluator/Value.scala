@@ -14,7 +14,9 @@ sealed trait Value {
 }
 
 object Value:
-  case class Closure(env: EvalContext, arg: ParamSymbol, body: Expr) extends Value
+  case class Closure(env: EvalContext, arg: ParamSymbol, body: Expr) extends Value {
+    override def toString(): String = s"Closure($arg, $body)"
+  }
   case class PiValue(resTyp: Closure) extends Value
 
   case class AppliedType(tycon: TypeConSymbol, args: List[Value]) extends Value
@@ -35,4 +37,5 @@ object Value:
     case class Var(sym: ValSymbol) extends Neutral
     case class Apply(fun: NeutralValue, arg: Value) extends Neutral
     case class LevelLub(l: NeutralValue | LevelVal, r: NeutralValue | LevelVal) extends Neutral
+    case class Match(scrut: NeutralValue, cases: List[CaseDef]) extends Neutral
 

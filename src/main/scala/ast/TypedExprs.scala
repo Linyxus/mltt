@@ -4,7 +4,16 @@ import core.Symbols._
 // import ast.Level
 
 object TypedExprs {
+  private var nextExprId: Int = 0
+
   sealed trait Expr {
+    protected val myId: Int =
+      nextExprId += 1
+      // assert(nextExprId != 7417, "GOTCHA")
+      nextExprId
+
+    def exprId: Int = myId
+
     private var myTpe: Expr | Null = null
     def tpe: Expr =
       assert(myTpe ne null, toString)
@@ -18,6 +27,17 @@ object TypedExprs {
       this
 
     def show: String
+  }
+
+  sealed trait BinderExpr extends Expr {
+    private var overridenId: Int = -1
+
+    override def exprId: Int =
+      if overridenId > 0 then overridenId else myId
+
+    def overwriteId(newId: Int): this.type =
+      overridenId = newId
+      this
   }
 
   trait ParamRef {
@@ -42,7 +62,7 @@ object TypedExprs {
     def show: String = sym.name
   }
 
-  case class PiType(argName: String, argTyp: Expr, resTyp: Expr) extends Expr {
+  case class PiType(argName: String, argTyp: Expr, resTyp: Expr) extends BinderExpr {
     def computeType: Type =
       (argTyp.tpe, resTyp.tpe) match
         case (Type(l1), Type(l2)) => Type(LLub(l1, l2))
@@ -69,14 +89,14 @@ object TypedExprs {
     def show: String = binder.argName
   }
 
-  case class PiIntro(argName: String, argTyp: Expr) extends Expr {
+  case class PiIntro(argName: String, argTyp: Expr) extends BinderExpr {
     private var myBody: Expr | Null = null
     def body: Expr = myBody.nn
     def withBody(e: Expr): this.type =
       myBody = e
       this
 
-    override def toString(): String = s"PiIntro@${hashCode()}($argName, $argTyp, $body)"
+    override def toString(): String = s"PiIntro@${exprId}($argName, $argTyp, $body)"
 
     def show: String = s"(($argName:${argTyp.show}) => ${body.show})"
   }
@@ -87,7 +107,7 @@ object TypedExprs {
 
     override def toString(): String =
       if hasBinder then
-        s"<${binder.hashCode()}:${binder.argName}>"
+        s"<${binder.exprId}:${binder.argName}>"
       else
         "<unbound:λ>"
 
@@ -105,13 +125,30 @@ object TypedExprs {
     def show: String = s"${datacon.name}(${args.map(_.show).mkString(", ")})"
   }
 
-  case class Pattern(datacon: DataConSymbol, argNames: List[String], argTyps: List[Expr])
+  case class Pattern(datacon: DataConSymbol, argNames: List[String], argTyps: List[Expr]) {
+    def show: String = s"${datacon.name}(${argNames.mkString(", ")})"
+  }
+
   case class CaseDef(pat: Pattern, body: Expr) {
+    protected var myId: Int =
+      nextExprId += 1
+      nextExprId
+
+    def exprId: Int = myId
+
+    def overwriteId(newId: Int): this.type =
+      myId = newId
+      this
+
     private var myPatMat: Match | Null = null
     def patmat: Match = myPatMat.nn
     def overwritePatMat(patmat: Match): this.type =
       myPatMat = patmat
       this
+
+    override def toString(): String = s"CaseDef@$hashCode($pat, $body)"
+
+    def show: String = s"case ${pat.show} => ${body.show}"
   }
   case class Match(scrutinee: Expr) extends Expr {
     private var myCases: List[CaseDef] | Null = null
@@ -124,7 +161,7 @@ object TypedExprs {
       this
 
     override def toString(): String = s"Match($scrutinee, $cases)"
-    def show: String = "MATCH"
+    def show: String = s"${scrutinee.show} match { ${cases.map(_.show).mkString("; ")} }"
   }
 
   case class PatternBoundParamRef(paramIdx: Int) extends Expr with ParamRef {
@@ -135,7 +172,10 @@ object TypedExprs {
 
     override def toString(): String =
       if hasBinder then
-        binder.pat.argNames(paramIdx)
+        if hasBinder then
+          s"<${binder.hashCode()}:${binder.pat.argNames(paramIdx)}>"
+        else
+          "<unbound:λ>"
       else "<unbound:pattern>"
 
      def show: String = binder.pat.argNames(paramIdx)
@@ -198,7 +238,9 @@ object TypedExprs {
           traverse(argTyp)
           traverse(resTyp)
         case PiTypeParamRef() => ()
-        case PiIntro(argName, argTyp) => traverse(argTyp)
+        case e @ PiIntro(argName, argTyp) =>
+          traverse(argTyp)
+          traverse(e.body)
         case PiIntroParamRef() => ()
         case PiElim(func, arg) =>
           traverse(func)
@@ -289,27 +331,31 @@ object TypedExprs {
       case e @ LLub(_, _) => traverseLLub(e)
       case e @ Wildcard() => traverseWildcard(e)
 
+  def isSameBinder(b1: Expr, b2: Expr): Boolean =
+      b1.exprId == b2.exprId
+
   trait ExprMap:
     def isDebugging: Boolean = false
+    def pure: Boolean = false
 
     private def updatePiTypeParamRef(old: PiType, neo: PiType, e: Expr): Unit =
       val traverser = new ExprTraverser:
         override def traversePiTypeParamRef(e: PiTypeParamRef): Unit =
-          if e.hasBinder && (e.binder eq old) then e.overwriteBinder(neo)
+          if e.hasBinder && isSameBinder(old, e.binder) then e.overwriteBinder(neo)
           traverseSubtrees(e)
       traverser.traverse(e)
 
     private def updatePiIntroParamRef(old: PiIntro, neo: PiIntro, e: Expr): Unit =
       val traverser = new ExprTraverser:
         override def traversePiIntroParamRef(e: PiIntroParamRef): Unit =
-          if e.hasBinder && (e.binder eq old) then e.overwriteBinder(neo)
+          if e.hasBinder && isSameBinder(old, e.binder) then e.overwriteBinder(neo)
           traverseSubtrees(e)
       traverser.traverse(e)
 
     private def updatePatternBoundParamRef(old: CaseDef, neo: CaseDef, e: Expr): Unit =
       val traverser = new ExprTraverser:
         override def traversePatternBoundParamRef(e: PatternBoundParamRef): Unit =
-          if e.hasBinder && (e.binder eq old) then e.overwriteBinder(neo)
+          if e.hasBinder && (e.binder.exprId == old.exprId) then e.overwriteBinder(neo)
           traverseSubtrees(e)
       traverser.traverse(e)
 
@@ -317,17 +363,17 @@ object TypedExprs {
 
     def mapPiType(e: PiType): Expr =
       val res = PiType(e.argName, this(e.argTyp), this(e.resTyp)).withType(this(e.tpe))
-      updatePiTypeParamRef(e, res, res.resTyp)
-      res
+      // updatePiTypeParamRef(e, res, res.resTyp)
+      res.overwriteId(e.exprId)
 
-    def mapPiTypeParamRef(e: PiTypeParamRef): Expr = e
+    def mapPiTypeParamRef(e: PiTypeParamRef): Expr = e.copy().overwriteBinder(e.binder)
 
     def mapPiIntro(e: PiIntro): Expr =
       val res = PiIntro(e.argName, this(e.argTyp)).withBody(this(e.body)).withType(this(e.tpe))
-      updatePiIntroParamRef(e, res, res.body)
-      res
+      // updatePiIntroParamRef(e, res, res.body)
+      res.overwriteId(e.exprId)
 
-    def mapPiIntroParamRef(e: PiIntroParamRef): Expr = e
+    def mapPiIntroParamRef(e: PiIntroParamRef): Expr = PiIntroParamRef().overwriteBinder(e.binder)
 
     def mapPiElim(e: PiElim): Expr =
       PiElim(this(e.func), this(e.arg)).withType(this(e.tpe))
@@ -343,9 +389,9 @@ object TypedExprs {
 
     def mapCaseDef(pm: Match, cdef: CaseDef): CaseDef =
       val res = CaseDef(mapPattern(cdef.pat), this(cdef.body)).overwritePatMat(pm)
-      updatePatternBoundParamRef(cdef, res, res.body)
-      res.pat.argTyps.foreach(updatePatternBoundParamRef(cdef, res, _))
-      res
+      // updatePatternBoundParamRef(cdef, res, res.body)
+      // res.pat.argTyps.foreach(updatePatternBoundParamRef(cdef, res, _))
+      res.overwriteId(cdef.exprId)
 
     def mapMatch(e: Match): Expr =
       val res = Match(this(e.scrutinee))
@@ -353,7 +399,7 @@ object TypedExprs {
       res.setCases(cases1).withType(this(e.tpe))
 
     def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
-      e
+      e.copy().overwriteBinder(e.binder)
 
     def mapType(e: Type): Expr = e
 

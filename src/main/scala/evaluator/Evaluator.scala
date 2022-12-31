@@ -12,7 +12,7 @@ import Value._
 import Symbols._
 
 object Evaluator:
-  def eval(e: Expr)(using EvalContext): Value =
+  def eval(e: Expr)(using EvalContext): Value = trace(s"eval($e)") {
     val res = e match
       case ValRef(sym) =>
         val res = ctx.lookup(sym)
@@ -30,6 +30,7 @@ object Evaluator:
       case PiElim(func, arg) => evalApply(eval(func), eval(arg))
       case AppliedTypeCon(tycon, args) => AppliedType(tycon, args.map(eval(_)))
       case AppliedDataCon(datacon, args) => AppliedData(datacon, args.map(eval(_)))
+      case e @ Match(scrutinee) => evalMatch(eval(scrutinee), e.cases, e.tpe)
       case Type(level) => TypeValue(eval(level))
       case LZero() => LZeroVal()
       case LSucc(e) => LSuccVal(eval(e))
@@ -38,6 +39,7 @@ object Evaluator:
       case Level() => LevelValue()
       case _ => assert(false, s"non-supported: $e")
     res.withType(e.tpe)
+  }
 
   def evalApply(fun: Value, arg: Value): Value =
     fun match
@@ -49,6 +51,42 @@ object Evaluator:
         val tpe: Expr = Typer.substBinder(tp, readBack(arg), resTyp)
         NeutralValue(Neutral.Apply(nv, arg)).withType(tpe)
       case _ => assert(false, fun)
+
+  def evalCase(cdef: CaseDef, argsOpt: Option[List[Value]])(using EvalContext): (Value, List[ParamSymbol]) =
+    @annotation.tailrec def buildParamSyms(ps: List[(String, Expr)], idx: Int, acc: List[ParamSymbol]): List[ParamSymbol] = ps match
+      case Nil => acc.reverse
+      case (pname, ptyp) :: ps =>
+        val sym = ParamSymbol(pname, ptyp)
+        val substitutor = new ExprMap:
+          override def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
+            if (e.binder.exprId == cdef.exprId) && e.paramIdx == idx then ValRef(sym)
+            else super.mapPatternBoundParamRef(e)
+        buildParamSyms(ps.map((name, typ) => (name, substitutor(typ))), idx + 1, sym :: acc)
+    val psyms = buildParamSyms(cdef.pat.argNames.zip(cdef.pat.argTyps), 0, Nil)
+    val substitutor = new ExprMap:
+      override def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
+        if e.binder.exprId == cdef.exprId then ValRef(psyms(e.paramIdx)) else super.mapPatternBoundParamRef(e)
+      // override def apply(e: Expr): Expr =
+      //   println(s"apply($e)")
+      //   super.apply(e)
+    val body1 = substitutor(cdef.body)
+    val args = argsOpt getOrElse {
+      psyms.map(sym => NeutralValue(Neutral.Var(sym)).withType(sym.info))
+    }
+    (ctx.withBindings(psyms.zip(args))(eval(body1)), psyms)
+
+  def evalMatch(scrut: Value, cases: List[CaseDef], tp: Expr)(using EvalContext) = scrut match
+    case AppliedData(dcon, args) =>
+      @annotation.tailrec def recur(cs: List[CaseDef]): Value =
+        cs match
+          case Nil => assert(false)
+          case cdef :: cs =>
+            if cdef.pat.datacon.name == dcon.name then
+              evalCase(cdef, Some(args))._1
+            else recur(cs)
+      recur(cases)
+    case scrut @ NeutralValue(neu) => NeutralValue(Neutral.Match(scrut, cases)).withType(tp)
+    case _ => assert(false, scrut)
 
   def evalLevelLub(l1: Value, l2: Value): Value =
     (l1, l2) match
@@ -96,6 +134,8 @@ object Evaluator:
         PiElim(readBack(fun.neutral, fun.tpe), readBack(arg)).withType(tp)
       case Neutral.LevelLub(l1, l2) =>
         LLub(readBackLevel(l1), readBackLevel(l2))
+      case Neutral.Match(scrut, cases) =>
+        ???
   }
 
   def readBackLevel(l: NeutralValue | LevelVal): Expr = l match
@@ -108,5 +148,9 @@ object Evaluator:
   def evalDef(sym: ValSymbol, e: Expr)(using EvalContext): Value =
     val res = eval(e)
     ctx.addBinding(sym, res)
+    res match
+      case Closure(env, arg, body) =>
+        env.addBinding(sym, res)
+      case _ =>
     res
 
