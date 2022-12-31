@@ -320,10 +320,6 @@ def two: Nat = add(one, one)
 def three: Nat = add(two, one)
 def four: Nat = add(two, two)
 
-def lemma(n: Nat): EqN(n, add(n, Zero())) = n match
-  case Zero() => ???
-  case Succ(n) => ???
-
 def mult(a: Nat, b: Nat): Nat = a match
   case Zero() => Zero()
   case Succ(a) => add(b, mult(a, b))
