@@ -304,10 +304,6 @@ class Typer:
         case other => Left(s"cannot pattern match $scrutinee of type $other")
     }
 
-  def collectAll[X](xs: List[TyperResult[X]]): TyperResult[List[X]] = xs match
-    case Nil => Right(Nil)
-    case x :: xs => x.flatMap(x => collectAll(xs).map(x :: _))
-
   def retriveAppliedArguments(expr: tpd.Expr): List[tpd.Expr] =
     @annotation.tailrec def recur(e: tpd.Expr, acc: List[tpd.Expr]): List[tpd.Expr] = e match
       case tpd.PiElim(app, arg) => recur(app, arg :: acc)
@@ -427,3 +423,7 @@ object Typer:
       //   println(s"abstracting symbol for $e")
       //   super.apply(e)
     treeMap(e)
+
+  def collectAll[X](xs: List[TyperResult[X]]): TyperResult[List[X]] = xs match
+    case Nil => Right(Nil)
+    case x :: xs => x.flatMap(x => collectAll(xs).map(x :: _))

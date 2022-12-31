@@ -53,7 +53,8 @@ class Tokenizer(source: String):
           // emitToken(Outdent())
           ()
         else
-          emitToken(ErrorToken(s"Invalid indent: $col"))
+          // emitToken(ErrorToken(s"Invalid indent: $col"))
+          ()
 
   def scanIdentifier(): Unit =
     val stop_chars = ":(){},".toSet

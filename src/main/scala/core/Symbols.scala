@@ -4,6 +4,8 @@ import ast.{TypedExprs => tpd}
 import DataInfo._
 
 object Symbols {
+  protected var nextId: Int = 0
+
   sealed trait Symbol {
     type InfoType
 
@@ -11,6 +13,12 @@ object Symbols {
     def name: String
 
     override def toString(): String = s"Symbol($name)"
+
+    private var myId: Int =
+      nextId += 1
+      nextId
+
+    def symId: Int = myId
   }
 
   sealed trait ValSymbol extends Symbol {
