@@ -16,7 +16,7 @@ object Driver:
           case _ => None
 
   def readFile(path: String): String =
-    val content = io.Source.fromFile(path).getLines.mkString
+    val content = io.Source.fromFile(path).getLines.mkString("\n")
     content
 
   def checkFile(path: String): Option[String] =
