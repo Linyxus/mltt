@@ -173,6 +173,7 @@ class Parser(source: String):
     case Ident(name) if name == "lub" => parseLLub
     case Ident(name) => varOrPiIntro
     case LeftParen() => parsePi
+    case LeftBrace() => parseBlock
     case ErrorToken(msg) => Left(s"tokeniaztion error: $msg")
     case _ => Left(s"unexpected token type $peekType")
 
@@ -257,6 +258,20 @@ class Parser(source: String):
         case Nil => acc
         case x :: xs => recur(xs, PiIntro(x, acc))
     recur(args.reverse, body)
+
+  def parseBlock: ParseResult[Expr] =
+    def parseDefDefs: ParseResult[List[DefDef]] = ???
+      if peekType == Def() then
+        step()
+        parseDefDef flatMap { ddef =>
+          parseDefDefs map { ddefs => ddef :: ddefs }
+        }
+      else Right(Nil)
+    matchAhead(LeftBrace()) flatMap { _ =>
+      parseDefDefs flatMap { ddefs =>
+        parseExpr map { expr => Block(ddefs, expr) }
+      }
+    }
 
   def parseDefDef: ParseResult[DefDef] =
     matchAhead(Def()) flatMap { _ =>
