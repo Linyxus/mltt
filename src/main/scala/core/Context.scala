@@ -1,26 +1,31 @@
 package core
 
+import Context._
+import DataInfo._
+import ast.{TypedExprs => tpd, _}
+import core._
+import core.Symbols._
+import evaluator.{EvalContext, Evaluator, Value}
+import Value._
+
 class Context:
-  import Context._
-  import DataInfo._
-  import ast._
-  import TypedExprs.ValRef
-  import core.Symbols._
-  import evaluator.{EvalContext, Evaluator, Value}
-  import Value._
 
   private var dataInfos: List[TypeConInfo] = List.empty
-
   private var valInfos: List[ValInfo] = List.empty
-
   private var bindings: Map[String, ValSymbol] = Map.empty
+  private var myConstr: EqConstraint = EqConstraint.empty
 
   def fresh: Context =
     val freshCtx = new Context
     freshCtx.dataInfos = dataInfos
     freshCtx.valInfos = valInfos
     freshCtx.bindings = bindings
+    freshCtx.myConstr = myConstr
     freshCtx
+
+  def constraint: EqConstraint = myConstr
+
+  def constraint_=(newConstr: EqConstraint): Unit = myConstr = newConstr
 
   def toEvalContext: EvalContext =
     val ectx = new EvalContext
@@ -29,7 +34,7 @@ class Context:
     bindings.foreach((_, sym) => ectx.addBinding(sym, NeutralValue(Neutral.Var(sym)).withType(sym.info)))
     ectx
 
-  def description(showOp: TypedExprs.Expr => String): String =
+  def description(showOp: tpd.Expr => String): String =
     val sb = StringBuilder()
     bindings.foreach { (_, sym) =>
       sb ++= s"${sym.name} : ${showOp(sym.info)}\n"

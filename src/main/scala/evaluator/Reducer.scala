@@ -1,11 +1,13 @@
 package evaluator
 
 import ast.TypedExprs._
+import core.Context
+import Context._
 import core.Symbols._
 import typer.Typer
 import utils.trace
 
-class Reducer extends ExprMap:
+class Reducer(using Context) extends ExprMap:
   private var isReduced: List[Boolean] = Nil
 
   def conclude(isReduced: Boolean)(e: Expr): e.type =
@@ -33,7 +35,13 @@ class Reducer extends ExprMap:
   override def mapValRef(e: ValRef): Expr =
     e.sym match
       case sym @ ParamSymbol(_, _) =>
-        nonReduced(e)
+        ctx.constraint.instanceOf(sym) match
+          case Some(e) => reduced(e)
+          case None =>
+            val psym = ctx.constraint.reprOf(sym)
+            if psym eq sym then
+              nonReduced(e)
+            else reduced(ValRef(psym))
       case sym @ ValDefSymbol(_) =>
         val result = this(sym.dealias.expr)
         result
@@ -167,6 +175,6 @@ object Reducer:
       true
     case _ => false
 
-  def reduce(e: Expr): Expr =
+  def reduce(e: Expr)(using Context): Expr =
     val reducer = new Reducer
     reducer(e)

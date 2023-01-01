@@ -6,11 +6,11 @@ import Symbols._
 import Typer.TyperResult
 
 trait ConstraintSolving:
-  def constraint: EqConstraint
-  def constraint_=(c: EqConstraint): Unit
-  def normalise(e: Expr): Expr
+  def constraint(using Context): EqConstraint
+  def constraint_=(c: EqConstraint)(using Context): Unit
+  def normalise(e: Expr)(using Context): Expr
 
-  def addEquality(e1: Expr, e2: Expr): TyperResult[Unit] =
+  def addEquality(e1: Expr, e2: Expr)(using Context): TyperResult[Unit] =
     def checkParams(p: ParamSymbol, q: ParamSymbol): TyperResult[Unit] =
       if constraint.isSame(p, q) then Right(())
       else

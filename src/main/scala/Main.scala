@@ -5,6 +5,19 @@ import driver.Driver._
 enum Eq(A: Type, a: A, b: A) extends Type:
   case Refl(A: Type, a: A) extends Eq(A, a, a)
 
+def symm(A: Type, a: A, b: A, eq: Eq(A, a, b)): Eq(A, b, a) =
+  eq match
+    case Refl(A, c) => eq
+
+def trans(
+  A: Type, a: A, b: A, c: A,
+  eq1: Eq(A, a, b),
+  eq2: Eq(A, b, c)): Eq(A, a, c) =
+  eq1 match
+    case Refl(A, x) =>
+      eq2 match
+        case Refl(A, y) => Refl(A, b)
+
 enum Nat extends Type:
   case Zero() extends Nat()
   case Succ(n: Nat()) extends Nat()
@@ -20,8 +33,28 @@ println(add)
 
 def lemma1(n: Nat): EqN(n, add(n, Zero)) =
   n match
-    case Zero() => ???
+    case Zero() => Refl(Nat, Zero())
     case Succ(n0) => ???
 """
-  println(check(source))
+  val source1 = """
+enum Eq(A: Type, a: A, b: A) extends Type:
+  case Refl(A: Type, a: A) extends Eq(A, a, a)
+
+enum List(A: Type) extends Type:
+  case Nil(A: Type) extends List(A)
+  case Cons(A: Type, head: A, tail: List(A)) extends List(A)
+
+def snoc(A: Type, x: A, xs: List(A)): List(A) = xs match
+  case Nil(A) => Cons(A, x, Nil(A))
+  case Cons(A, y, ys) => Cons(A, y, snoc(A, x, ys))
+
+def rev(A: Type, xs: List(A)): List(A) = xs match
+  case Nil(A) => Nil(A)
+  case Cons(A, y, ys) => snoc(A, y, rev(A, ys))
+
+def revrev(A: Type, xs: List(A)): Eq(List(A), xs, rev(A, rev(A, xs))) = xs match
+  case Nil(A) => Refl(List(A), Nil(A))
+  case Cons(A, x, xs) => ???
+"""
+  println(check(source1))
 }

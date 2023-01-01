@@ -10,7 +10,7 @@ import evaluator.{EvalContext, Evaluator, Reducer}
 import utils.trace
 import ast.TypedExprs.PatternBoundParamRef
 
-class Typer:
+class Typer extends ConstraintSolving:
   import Typer._
   import DataInfo._
   import Context._
@@ -23,6 +23,9 @@ class Typer:
   def normalise(e: tpd.Expr)(using Context): tpd.Expr =
     // Evaluator.normalise(e)(using ctx.toEvalContext)
     Reducer.reduce(e)
+
+  def constraint(using Context): EqConstraint = ctx.constraint
+  def constraint_=(c: EqConstraint)(using Context): Unit = ctx.constraint = c
 
   def typedDataDef(ddef: DataDef)(using Context): TyperResult[TypeConInfo] =
     def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
@@ -193,6 +196,8 @@ class Typer:
         println(s"Goal: ${normalise(pt).show}")
         println(s"=====================")
         println(ctx.description(e => normalise(e).show))
+        println(s"---------------------")
+        println(ctx.constraint.show ++ "\n")
         Right(tpd.Wildcard().withType(pt))
     case _ => Left(s"not supported: typed($e)")
 
@@ -268,7 +273,14 @@ class Typer:
                     case exp :: args => Left(s"ill-formed pattern: $pat")
                 recur(pat.args, dcon.sig, Nil)
               case None => Left(s"unknown data constructor ${pat.name}")
-          def typedCase(cdef: CaseDef): TyperResult[tpd.CaseDef] = typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
+          def typedCase(cdef: CaseDef)(using Context): TyperResult[tpd.CaseDef] = typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
+            def updateConstraint: TyperResult[Unit] =
+              addEquality(pat, scrutinee) flatMap { _ =>
+                addEquality(pat.tpe, scrutTyp)
+              }
+            updateConstraint match
+              case Left(err) => println(s"impossible pattern: $err")
+              case _ => 
             ctx.withBindings(paramSyms) {
               typed(cdef.body, pt = pt) map { body =>
                 val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
@@ -287,7 +299,7 @@ class Typer:
               }
             }
           }
-          collectAll(e.cases.map(typedCase)).flatMap { cases =>
+          collectAll(e.cases.map(x => typedCase(x)(using ctx.fresh))).flatMap { cases =>
             val res = tpd.Match(scrutinee)
             cases.foreach(_.overwritePatMat(res))
             val datacons = cases.map(_.pat.datacon)
