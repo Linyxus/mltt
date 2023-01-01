@@ -14,6 +14,7 @@ class Context:
   private var valInfos: List[ValInfo] = List.empty
   private var bindings: Map[String, ValSymbol] = Map.empty
   private var myConstr: EqConstraint = EqConstraint.empty
+  private var localSyms: Set[ValDefSymbol] = Set.empty
 
   def fresh: Context =
     val freshCtx = new Context
@@ -21,6 +22,7 @@ class Context:
     freshCtx.valInfos = valInfos
     freshCtx.bindings = bindings
     freshCtx.myConstr = myConstr
+    freshCtx.localSyms = localSyms
     freshCtx
 
   def constraint: EqConstraint = myConstr
@@ -39,6 +41,10 @@ class Context:
     bindings.foreach { (_, sym) =>
       sb ++= s"${sym.name} : ${showOp(sym.info)}\n"
     }
+    localSyms.foreach { sym =>
+      val vinfo = lookupValDef(sym.name).get
+      sb ++= s"${sym.name} : ${showOp(vinfo.info)}\n"
+    }
     sb.result
 
   def withBinding[T](sym: ValSymbol)(op: Context ?=> T): T =
@@ -56,9 +62,10 @@ class Context:
     freshCtx.addDataInfo(info)
     op(using freshCtx)
 
-  def withValInfo[T](info: ValInfo)(op: Context ?=> T): T =
+  def withValInfo[T](info: ValInfo, local: Boolean = false)(op: Context ?=> T): T =
     val freshCtx = fresh
     freshCtx.addValInfo(info)
+    if local then freshCtx.localSyms += info.sym
     op(using freshCtx)
 
   def addDataInfo(info: TypeConInfo): Unit =

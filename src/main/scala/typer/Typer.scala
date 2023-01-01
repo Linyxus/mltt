@@ -199,6 +199,7 @@ class Typer extends ConstraintSolving:
         println(s"---------------------")
         println(ctx.constraint.show ++ "\n")
         Right(tpd.Wildcard().withType(pt))
+    case e: Block => typedBlock(e, pt)
     case _ => Left(s"not supported: typed($e)")
 
   def typedType(e: Type, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
@@ -377,6 +378,32 @@ class Typer extends ConstraintSolving:
           typedApplyFunctionParams(fun, args)
         }
 
+  def typedBlock(e: Block, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
+    def recur(ds: List[DefDef], acc: List[ValDefSymbol], e: Expr)(using Context): TyperResult[tpd.Expr] =
+      ds match
+        case Nil =>
+          def build(e: tpd.Expr, acc: List[ValDefSymbol]): tpd.Expr =
+            acc match
+              case Nil => e
+              case sym :: acc =>
+                val pref = PiIntroParamRef()
+                val tpref = PiTypeParamRef()
+                val body = abstractSymbol(sym, pref, e)
+                val binder = tpd.PiIntro(sym.name, body)
+                val tpe = tpd.PiType(sym.name, sym.info, liftParamRefInType(pref, tpref, body)).withType()
+                binder.withType(tpe)
+                pref.overwriteBinder(binder)
+                tpref.overwriteBinder(tpe)
+                val arg = sym.dealias.expr
+                val app = tpd.PiElim(binder, arg).withType(substBinder(tpe, arg, tpe.resTyp))
+                build(app, acc)
+          typed(e, pt)
+        case d :: ds =>
+          typedDefDef(d) flatMap { dinfo =>
+            ctx.withValInfo(dinfo, local = true) { recur(ds, dinfo.sym :: acc, e) }
+          }
+    recur(e.ddefs, Nil, e.expr)
+
   def typedDefinition(d: Definition)(using Context): TyperResult[Unit] =
     d match
       case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
@@ -409,6 +436,11 @@ object Typer:
         if e.binder.exprId == binder.exprId then to else super.mapPiIntroParamRef(e)
     exprMap(expr)
 
+  def substBinder(name: String, to: Expr, ddef: DefDef): DefDef =
+    val typ1 = substBinder(name, to, ddef.typ)
+    val body1 = if name == ddef.name then ddef.body else substBinder(name, to, ddef.body)
+    DefDef(ddef.name, typ1, body1)
+
   def substBinder(name: String, to: Expr, expr: Expr): Expr =
     def k(expr: Expr): Expr = substBinder(name, to, expr)
     expr match
@@ -425,6 +457,15 @@ object Typer:
       case LSucc(pred) => LSucc(k(pred))
       case LLub(l1, l2) => LLub(k(l1), k(l2))
       case Undefined() => Undefined()
+      case Block(ddefs, e) =>
+        def recur(ddefs: List[DefDef], acc: List[DefDef], e: Expr): Block =
+          ddefs match
+            case Nil => Block(acc.reverse, k(e))
+            case ddef :: ds =>
+              val ddef1 = substBinder(name, to, ddef)
+              if ddef1.name == name then Block(acc.reverse ++ (ddef1 :: ds), e)
+              else recur(ds, ddef1 :: acc, e)
+        recur(ddefs, Nil, e)
       case Wildcard => Wildcard
 
   def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr): tpd.Expr =
