@@ -262,7 +262,6 @@ class Parser(source: String):
   def parseBlock: ParseResult[Expr] =
     def parseDefDefs: ParseResult[List[DefDef]] =
       if peekType == Def() then
-        step()
         parseDefDef flatMap { ddef =>
           parseDefDefs map { ddefs => ddef :: ddefs }
         }
