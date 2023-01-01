@@ -61,17 +61,25 @@ class Reducer(using Context) extends ExprMap:
     nonReduced(super.mapPiIntroParamRef(e))
 
   override def mapPiElim(e: PiElim): Expr =
-    val e0 @ PiElim(fun1, arg1) = checkReduction(super.mapPiElim(e))
-    val red = popLastReduction()
+    val fun1 = this(e.func)
+    val redFun = popLastReduction()
+    val arg1 = this(e.arg)
+    val redArg = popLastReduction()
+    val tpe1 = this(e.tpe)
+    val redTpe = popLastReduction()
+    val red = redFun || redArg || redTpe
+    // val e0 @ PiElim(fun1, arg1) = checkReduction(super.mapPiElim(e))
     fun1 match
       case fun1: PiIntro =>
         val body = Typer.substBinder(fun1, arg1, fun1.body)
         val e1 = this(body)
         val red1 = popLastReduction()
-        if e1.isInstanceOf[Match] && false then
-          conclude(red)(e0)
+        if e1.isInstanceOf[Match] then
+          // conclude(red)(e0)
+          // println(s"rolling back, not reduce ${e.show} (was ${e1.show})")
+          conclude(redArg || redTpe)(PiElim(e.func, arg1).withType(tpe1))
         else conclude(red1 || red)(e1)
-      case _ => conclude(red)(fun1)
+      case _ => conclude(red)(PiElim(fun1, arg1).withType(tpe1))
 
   override def mapAppliedDataCon(e: AppliedDataCon): Expr = checkReduction {
     super.mapAppliedDataCon(e)
@@ -84,7 +92,7 @@ class Reducer(using Context) extends ExprMap:
   override def mapMatch(e: Match): Expr = {
     val scrut = this(e.scrutinee)
     popLastReduction()
-    if Reducer.isNeutralExpr(scrut) then
+    if Reducer.isNeutralExpr(scrut) || scrut.isInstanceOf[PiElim] then
       nonReduced(e)
     else
       scrut match

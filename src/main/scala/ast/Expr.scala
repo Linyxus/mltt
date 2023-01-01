@@ -34,6 +34,8 @@ case class CaseDef(pat: ApplyDataCon, body: Expr)
 
 case class Match(scrutinee: Expr, cases: List[CaseDef]) extends Expr
 
+case class Block(ddefs: DefDef, expr: Expr) extends Expr
+
 case class Level() extends Expr
 
 case class LZero() extends Expr

@@ -40,6 +40,22 @@ def lemma1(n: Nat): EqN(n, add(n, Zero)) =
 enum Eq(A: Type, a: A, b: A) extends Type:
   case Refl(A: Type, a: A) extends Eq(A, a, a)
 
+def cong(
+  A: Type, B: Type,
+  a: A, b: A, f: (x: A) -> B,
+  eq: Eq(A, a, b)
+): Eq(B, f(a), f(b)) =
+  eq match
+    case Refl(A, c) => Refl(B, f(c))
+
+def transp(
+  A: Type, P: (x: A) -> Type,
+  a: A, b: A,
+  eq: Eq(A, a, b),
+  pa: P(b)
+): P(b) = eq match
+  case Refl(A, c) => pa
+
 enum List(A: Type) extends Type:
   case Nil(A: Type) extends List(A)
   case Cons(A: Type, head: A, tail: List(A)) extends List(A)
@@ -52,9 +68,13 @@ def rev(A: Type, xs: List(A)): List(A) = xs match
   case Nil(A) => Nil(A)
   case Cons(A, y, ys) => snoc(A, y, rev(A, ys))
 
-def revrev(A: Type, xs: List(A)): Eq(List(A), xs, rev(A, rev(A, xs))) = xs match
-  case Nil(A) => Refl(List(A), Nil(A))
-  case Cons(A, x, xs) => ???
+def revSnoc(A: Type, x: A, xs: List(A)): Eq(List(A), rev(A, snoc(A, x, xs)), Cons(A, x, rev(A, xs))) =
+  xs match
+    case Nil(A) => Refl(List(A), Cons(A, x, Nil(A)))
+    case Cons(A, y, ys) => ???
 """
+// def revrev(A: Type, xs: List(A)): Eq(List(A), xs, rev(A, rev(A, xs))) = xs match
+//   case Nil(A) => Refl(List(A), Nil(A))
+//   case Cons(A, y, ys) => ???
   println(check(source1))
 }

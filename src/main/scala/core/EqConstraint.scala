@@ -41,7 +41,9 @@ case class EqConstraint(
       }
     def instanceEqs: List[String] =
       instances.map { (x, inst) => s"${x.symbol} === ${inst.show}" }.toList
-    val allEqs = paramEqs ++ instanceEqs
+    def complexEqs: List[String] =
+      otherEq map { (x, y) => s"${x.show} === ${y.show}" }
+    val allEqs = paramEqs ++ instanceEqs ++ complexEqs
     s"EqConstraint(${allEqs.mkString(", ")})"
 
 object EqConstraint:
