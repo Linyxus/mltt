@@ -260,7 +260,7 @@ class Parser(source: String):
     recur(args.reverse, body)
 
   def parseBlock: ParseResult[Expr] =
-    def parseDefDefs: ParseResult[List[DefDef]] = ???
+    def parseDefDefs: ParseResult[List[DefDef]] =
       if peekType == Def() then
         step()
         parseDefDef flatMap { ddef =>
@@ -269,7 +269,9 @@ class Parser(source: String):
       else Right(Nil)
     matchAhead(LeftBrace()) flatMap { _ =>
       parseDefDefs flatMap { ddefs =>
-        parseExpr map { expr => Block(ddefs, expr) }
+        parseExpr flatMap { expr =>
+          matchAhead(RightBrace()) map { _ => Block(ddefs, expr) }
+        }
       }
     }
 

@@ -71,7 +71,9 @@ def rev(A: Type, xs: List(A)): List(A) = xs match
 def revSnoc(A: Type, x: A, xs: List(A)): Eq(List(A), rev(A, snoc(A, x, xs)), Cons(A, x, rev(A, xs))) =
   xs match
     case Nil(A) => Refl(List(A), Cons(A, x, Nil(A)))
-    case Cons(A, y, ys) => ???
+    case Cons(A, y, ys) => {
+      ???
+    }
 """
 // def revrev(A: Type, xs: List(A)): Eq(List(A), xs, rev(A, rev(A, xs))) = xs match
 //   case Nil(A) => Refl(List(A), Nil(A))

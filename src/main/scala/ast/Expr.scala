@@ -16,6 +16,7 @@ sealed trait Expr {
     case LLub(l1, l2) => s"$l1 ⊔ $l2"
     case Undefined() => "???"
     case Wildcard => "_"
+    case Block(ddefs, expr) => s"Block($ddefs, $expr)"
 }
 
 case class Var(name: String) extends Expr
