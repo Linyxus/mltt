@@ -1,4 +1,4 @@
-package  typer
+package typer
 
 import core._
 import ast._
@@ -15,7 +15,7 @@ class Typer extends ConstraintSolving:
   import DataInfo._
   import Context._
 
-  def isUniverse(e: tpd.Expr)(using Context): TyperResult[Unit] = e match
+  def isUniverse(e: tpd.Expr)(using Context): TyperResult[Unit] = normalise(e) match
     case _: tpd.Type => Right(())
     case tpd.Wildcard() => Right(())
     case _ => Left(s"not supported: isType($e)")
@@ -194,6 +194,8 @@ class Typer extends ConstraintSolving:
         Left(s"cannot type ??? w/o an expected type")
       else
         println(s"Goal: ${normalise(pt).show}")
+        // println(s"normalising ${pt.show} --> ${normalise(pt).show}")
+        // println(s"constraint = ${ctx.constraint.show}")
         println(s"=====================")
         println(ctx.description(e => normalise(e).show))
         println(s"---------------------")
@@ -214,7 +216,7 @@ class Typer extends ConstraintSolving:
 
   def typedPi(argName: String, argTyp: Expr, resTyp: Expr)(using Context): TyperResult[tpd.Expr] =
     typed(argTyp) flatMap { argTyp1 =>
-      argTyp1.tpe match
+      normalise(argTyp1.tpe) match
         case tpd.Type(l1) =>
           val sym = ParamSymbol(argName, argTyp1)
           ctx.withBinding(sym) {
@@ -230,7 +232,7 @@ class Typer extends ConstraintSolving:
                 Right(binder)
               case _ => Left(s"return type $resTyp1 is not a type")
           }
-        case _ => Left(s"cannot abstract over $argTyp1")
+        case _ => Left(s"cannot abstract over $argTyp1 (${argTyp1.tpe.show})")
     }
 
   def typedPiIntro(argName: String, body: Expr, pt: tpd.Expr)(using Context): TyperResult[tpd.Expr] =
@@ -346,7 +348,7 @@ class Typer extends ConstraintSolving:
       Left(s"incorrect param num for data constructor ${info.name}")
 
   def typedApplyFunction(fun: tpd.Expr, arg: Expr)(using Context): TyperResult[tpd.Expr] =
-    fun.tpe match
+    normalise(fun.tpe) match
       case funType @ tpd.PiType(argName, typ, resTyp) =>
         typed(arg, typ) map { arg =>
           val tpe = substBinder(funType, arg, resTyp)
