@@ -141,7 +141,7 @@ class Parser(source: String):
           }
         }
       }
-      Right(Type(LZero()))
+      // Right(Type(LZero()))
 
   def parseLSucc: ParseResult[Expr] =
     step()
