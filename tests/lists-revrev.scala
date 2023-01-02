@@ -9,14 +9,6 @@ def cong(
   eq match
     case Refl(A, c) => Refl(B, f(c))
 
-def transp(
-  A: Type, P: (x: A) -> Type,
-  a: A, b: A,
-  eq: Eq(A, a, b),
-  pa: P(b)
-): P(b) = eq match
-  case Refl(A, c) => pa
-
 def symm(A: Type, a: A, b: A, eq: Eq(A, a, b)): Eq(A, b, a) =
   eq match
     case Refl(A, c) => eq
