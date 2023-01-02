@@ -60,7 +60,18 @@ class Reducer(using Context) extends ExprMap:
   override def mapPiIntroParamRef(e: PiIntroParamRef): Expr =
     nonReduced(super.mapPiIntroParamRef(e))
 
-  override def mapPiElim(e: PiElim): Expr =
+  private def lazyReduceFun(e: Expr): Expr =
+    val fun1 = this(e)
+    val red1 = popLastReduction()
+    if fun1.isInstanceOf[PiIntro] then
+      e match
+        case e @ ValRef(sym) => nonReduced(e)
+        case e @ PiElim(fun, arg) =>
+          checkReduction(PiElim(lazyReduceFun(fun), this(arg)).withType(this(e.tpe)))
+        case e => conclude(red1)(fun1)
+    else conclude(red1)(fun1)
+
+  override def mapPiElim(e: PiElim): Expr = trace(s"reducePiElim ${e.show}", showOp = (x: Expr) => x.show) {
     val fun1 = this(e.func)
     val redFun = popLastReduction()
     val arg1 = this(e.arg)
@@ -76,10 +87,13 @@ class Reducer(using Context) extends ExprMap:
         val red1 = popLastReduction()
         if e1.isInstanceOf[Match] then
           // conclude(red)(e0)
-          // println(s"rolling back, not reduce ${e.show} (was ${e1.show})")
-          conclude(redArg || redTpe)(PiElim(e.func, arg1).withType(tpe1))
+          // println(s"rolling back, not reduce ${e.show} (was ${e1.show}, fun1 = ${fun1.show})")
+          val fun1 = lazyReduceFun(e.func)
+          val redFun = popLastReduction()
+          conclude(redArg || redTpe || redFun)(PiElim(fun1, arg1).withType(tpe1))
         else conclude(red1 || red)(e1)
       case _ => conclude(red)(PiElim(fun1, arg1).withType(tpe1))
+  }
 
   override def mapAppliedDataCon(e: AppliedDataCon): Expr = checkReduction {
     super.mapAppliedDataCon(e)
