@@ -283,7 +283,7 @@ class Typer extends ConstraintSolving:
               }
             updateConstraint match
               case Left(err) => println(s"impossible pattern: $err")
-              case _ => 
+              case _ =>
             ctx.withBindings(paramSyms) {
               typed(cdef.body, pt = pt) map { body =>
                 val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
