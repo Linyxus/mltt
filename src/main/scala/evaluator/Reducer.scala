@@ -35,8 +35,11 @@ class Reducer(using Context) extends ExprMap:
   override def mapValRef(e: ValRef): Expr =
     e.sym match
       case sym @ ParamSymbol(_, _) =>
+        // if e.show == "i1" || e.show == "i2" then
+        //   println(s"reducing param $e (inst=${ctx.constraint.instanceOf(sym)}, repr=${ctx.constraint.reprOf(sym)})")
+        //   println(s"... constraint = ${ctx.constraint.show}")
         ctx.constraint.instanceOf(sym) match
-          case Some(e) => reduced(e)
+          case Some(e) => this(e)
           case None =>
             val psym = ctx.constraint.reprOf(sym)
             if psym eq sym then
