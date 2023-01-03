@@ -107,16 +107,23 @@ class Typer extends ConstraintSolving:
       case Some(_) => Left(s"already defined: ${ddef.name}")
       case None =>
         typed(ddef.typ) flatMap { sig =>
-          val dummySym = ParamSymbol(ddef.name, sig)
-          ctx.withBinding(dummySym) {
-            typed(ddef.body, sig) map { body =>
+          ddef.body match
+            case None =>
               val sym = ValDefSymbol(ddef.name)
-              val body1 = abstractSymbol(dummySym, tpd.ValRef(sym), body)
-              val res = ValInfo(sym, sig, body1)
+              val res = ValInfo(sym, sig, None)
               sym.overwriteValInfo(res)
-              res
-            }
-          }
+              Right(res)
+            case Some(body) =>
+              val dummySym = ParamSymbol(ddef.name, sig)
+              ctx.withBinding(dummySym) {
+                typed(body, sig) map { body =>
+                  val sym = ValDefSymbol(ddef.name)
+                  val body1 = abstractSymbol(dummySym, tpd.ValRef(sym), body)
+                  val res = ValInfo(sym, sig, Some(body1))
+                  sym.overwriteValInfo(res)
+                  res
+                }
+              }
         }
 
   def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
@@ -399,13 +406,16 @@ class Typer extends ConstraintSolving:
                 pref.overwriteBinder(binder)
                 tpref.overwriteBinder(tpe)
                 val arg = sym.dealias.expr
-                val app = tpd.PiElim(binder, arg).withType(substBinder(tpe, arg, tpe.resTyp))
+                val app = tpd.PiElim(binder, arg.get).withType(substBinder(tpe, arg.get, tpe.resTyp))
                 build(app, acc)
           typed(e, pt)
         case d :: ds =>
-          typedDefDef(d) flatMap { dinfo =>
-            ctx.withValInfo(dinfo, local = true) { recur(ds, dinfo.sym :: acc, e) }
-          }
+          d.body match
+            case None => Left(s"cannot assume definitions in a local block")
+            case Some(_) =>
+              typedDefDef(d) flatMap { dinfo =>
+                ctx.withValInfo(dinfo, local = true) { recur(ds, dinfo.sym :: acc, e) }
+              }
     recur(e.ddefs, Nil, e.expr)
 
   def typedDefinition(d: Definition)(using Context): TyperResult[Unit] =
@@ -442,7 +452,7 @@ object Typer:
 
   def substBinder(name: String, to: Expr, ddef: DefDef): DefDef =
     val typ1 = substBinder(name, to, ddef.typ)
-    val body1 = if name == ddef.name then ddef.body else substBinder(name, to, ddef.body)
+    val body1 = if name == ddef.name then ddef.body else ddef.body.map(body => substBinder(name, to, body))
     DefDef(ddef.name, typ1, body1)
 
   def substBinder(name: String, to: Expr, expr: Expr): Expr =

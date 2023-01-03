@@ -360,12 +360,14 @@ class Parser(source: String):
           matchAhead(Colon()) flatMap { _ =>
             parseExpr flatMap { resTyp =>
               val sig = makePiType(formals, resTyp)
-              matchAhead(Equal()) flatMap { _ =>
-                parseExpr map { body =>
-                  val term = makePiIntro(formals.map(_._1), body)
-                  DefDef(defname, sig, term)
+              if peekType == Equal() then
+                matchAhead(Equal()) flatMap { _ =>
+                  parseExpr map { body =>
+                    val term = makePiIntro(formals.map(_._1), body)
+                    DefDef(defname, sig, Some(term))
+                  }
                 }
-              }
+              else Right(DefDef(defname, sig, None))
             }
           }
         }

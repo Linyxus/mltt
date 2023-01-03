@@ -32,7 +32,7 @@ class Context:
   def toEvalContext: EvalContext =
     val ectx = new EvalContext
     for info <- valInfos.reverse do
-      Evaluator.evalDef(info.sym, info.expr)(using ectx)
+      Evaluator.evalDef(info.sym, info.expr.get)(using ectx)
     bindings.foreach((_, sym) => ectx.addBinding(sym, NeutralValue(Neutral.Var(sym)).withType(sym.info)))
     ectx
 

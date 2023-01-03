@@ -46,8 +46,9 @@ class Reducer(using Context) extends ExprMap:
               nonReduced(e)
             else reduced(ValRef(psym))
       case sym @ ValDefSymbol(_) =>
-        val result = this(sym.dealias.expr)
-        result
+        sym.dealias.expr match
+          case None => nonReduced(e)
+          case Some(e) => this(e)
 
   override def mapPiType(e: PiType): Expr = checkReduction {
     super.mapPiType(e)

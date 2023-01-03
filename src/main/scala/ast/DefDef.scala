@@ -1,4 +1,4 @@
 package ast
 
-case class DefDef(name: String, typ: Expr, body: Expr) extends Definition
+case class DefDef(name: String, typ: Expr, body: Option[Expr]) extends Definition
 
