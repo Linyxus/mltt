@@ -4,11 +4,8 @@ import core._
 import ast._
 import ast.{TypedExprs => tpd}
 import Symbols._
-import ast.TypedExprs.PiTypeParamRef
-import ast.TypedExprs.PiIntroParamRef
 import evaluator.{EvalContext, Evaluator, Reducer}
 import utils.trace
-import ast.TypedExprs.PatternBoundParamRef
 
 class Typer extends ConstraintSolving:
   import Typer._
@@ -219,7 +216,7 @@ class Typer extends ConstraintSolving:
   private def liftParamRefInType(from: tpd.PiIntroParamRef, to: tpd.PiTypeParamRef, tp: tpd.Expr): tpd.Expr =
     val treeMap = new tpd.ExprMap:
       // override def isDebugging: Boolean = true
-      override def mapPiIntroParamRef(e: PiIntroParamRef): ast.TypedExprs.Expr =
+      override def mapPiIntroParamRef(e: tpd.PiIntroParamRef): ast.TypedExprs.Expr =
         if e eq from then to else super.mapPiIntroParamRef(e)
     treeMap(tp)
 
@@ -296,7 +293,7 @@ class Typer extends ConstraintSolving:
             //   case _ =>
             if isImpossiblePattern then
               val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
-              val mapping: Map[ValSymbol, PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+              val mapping: Map[ValSymbol, tpd.PatternBoundParamRef] = Map.from(paramSyms zip prefs)
               val substitutor = new tpd.ExprMap:
                 override def mapValRef(e: tpd.ValRef): tpd.Expr =
                   mapping.get(e.sym) match
@@ -315,7 +312,7 @@ class Typer extends ConstraintSolving:
                   ctx.withBindings(paramSyms) {
                     typed(body, pt = pt) map { body =>
                       val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
-                      val mapping: Map[ValSymbol, PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+                      val mapping: Map[ValSymbol, tpd.PatternBoundParamRef] = Map.from(paramSyms zip prefs)
                       val substitutor = new tpd.ExprMap:
                         override def mapValRef(e: tpd.ValRef): tpd.Expr =
                           mapping.get(e.sym) match
@@ -416,8 +413,8 @@ class Typer extends ConstraintSolving:
             acc match
               case Nil => e
               case sym :: acc =>
-                val pref = PiIntroParamRef()
-                val tpref = PiTypeParamRef()
+                val pref = tpd.PiIntroParamRef()
+                val tpref = tpd.PiTypeParamRef()
                 val body = abstractSymbol(sym, pref, e)
                 val binder = tpd.PiIntro(sym.name, body)
                 val tpe = tpd.PiType(sym.name, sym.info, liftParamRefInType(pref, tpref, body)).withType()
