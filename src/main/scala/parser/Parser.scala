@@ -8,20 +8,28 @@ class Parser(source: String):
   import Parser._
 
   private var tokens: LazyList[Token] = Tokenizer.getTokensLazy(source)
+  tokens.toList
   private def current = tokens.head
   private var indentLevel: Int = 0
 
   def peekType: TokenType = current.tp
   def step(): Unit =
+    // println(s"!!! step is called")
+    // assert(tokens.toList.length != 15)
     if peekType == Indent() then
       indentLevel += 1
     else if peekType == Outdent() then
       indentLevel -= 1
     tokens = tokens.tail
+
   def eof: Boolean = peekType == EOF()
 
   def expect(tpe: TokenType): ParseResult[Token] =
-    if peekType == tpe then Right(current) else Left(s"expecting $tpe, but found $peekType")
+    if peekType == tpe then
+      Right(current)
+    else
+      // assert(tpe != RightParen())
+      Left(s"expecting $tpe, but found $peekType (${tokens.toList})")
 
   def matchAhead(tpe: TokenType): ParseResult[Token] =
     // tpe match
@@ -50,7 +58,9 @@ class Parser(source: String):
   def parsePattern: ParseResult[ApplyDataCon] =
     parseIdentifier flatMap { con =>
       step()
-      parseParamList map { args => ApplyDataCon(con.content, args) }
+      parseParamListWithImplicits map { (iargs, args) =>
+        ApplyDataCon(con.content, iargs.getOrElse(Nil), args.getOrElse(Nil))
+      }
     }
 
   def parseCaseDef: ParseResult[CaseDef] =
@@ -88,13 +98,45 @@ class Parser(source: String):
             parseExpr flatMap { argTyp =>
               matchAhead(RightParen()) flatMap { _ =>
                 matchAhead(Arrow()) flatMap { _ =>
-                  parseExpr map { resTyp => Pi(content, argTyp, resTyp) }
+                  parseExpr map { resTyp => Pi(content, argTyp, resTyp, false) }
+                } orElse {
+                  matchAhead(QuestionArrow()) flatMap { _ =>
+                    parseExpr map { resTyp => Pi(content, argTyp, resTyp, true) }
+                  }
                 }
               }
             }
           }
       }
     }
+
+  def parseParamListWithImplicits: ParseResult[(Option[List[Expr]], Option[List[Expr]])] =
+    def parseMoreParam: ParseResult[Expr] =
+      matchAhead(Comma()) flatMap { _ => parseExpr }
+    def parseMoreParams: List[Expr] =
+      @annotation.tailrec def recur(acc: List[Expr]): List[Expr] =
+        parseMoreParam match
+          case Left(_) => acc.reverse
+          case Right(arg) => recur(arg :: acc)
+      recur(Nil)
+
+    matchAhead(LeftParen()) flatMap { _ =>
+      if peekType == RightParen() then
+        step()
+        Right((None, Some(Nil)))
+      else
+        val isImp: Boolean = peekType == Using() && { step(); true }
+        val res = parseExpr flatMap { arg1 =>
+          val args = arg1 :: parseMoreParams
+          matchAhead(RightParen()) map { _ => args }
+        }
+        if isImp then
+          res.flatMap { args => parseParamListOptional.map(xs => (Some(args), xs)) }
+        else res.map(xs => (None, Some(xs)))
+    }
+
+  def parseParamListOptional: ParseResult[Option[List[Expr]]] =
+    if peekType == LeftParen() then parseParamList.map(Some(_)) else Right(None)
 
   def parseParamList: ParseResult[List[Expr]] =
     def parseMoreParam: ParseResult[Expr] =
@@ -119,14 +161,22 @@ class Parser(source: String):
   def parseExpr: ParseResult[Expr] = parseExprAtom flatMap { e =>
     @annotation.tailrec def recur(acc: Expr): ParseResult[Expr] =
       if peekType == LeftParen() then
-        parseParamList match
-          case err @ Left(_) => err.asInstanceOf
-          case Right(ps) => recur(Apply(acc, ps))
+        parseParamListWithImplicits match
+          case err @ Left(_) => err.asInstanceOf[ParseResult[Expr]]
+          case Right((ips, ps)) => (ips, ps) match
+            case (Some(ips), Some(ps)) =>
+              recur(Apply(Apply(acc, ips, imp = true), ps, imp = false))
+            case (Some(ips), None) =>
+              recur(Apply(acc, ips, imp = true))
+            case (None, Some(ps)) =>
+              recur(Apply(acc, ps, imp = false))
+            case (None, None) => assert(false)
       else if peekType == parser.Match() then
         step()
         Right(Match(acc, parseCaseDefs))
       else Right(acc)
-    recur(e)
+    val result = recur(e)
+    result
   }
 
   def parseType: ParseResult[Expr] =
@@ -175,7 +225,7 @@ class Parser(source: String):
     case LeftParen() => parsePi
     case LeftBrace() => parseBlock
     case ErrorToken(msg) => Left(s"tokeniaztion error: $msg")
-    case _ => Left(s"unexpected token type $peekType")
+    case _ => Left(s"unexpected token type $peekType, (${tokens.toList})")
 
   def parseMany[T](lead: TokenType, op: () => ParseResult[T]): ParseResult[List[T]] =
     @annotation.tailrec def recur(acc: List[T]): ParseResult[List[T]] =
@@ -194,6 +244,27 @@ class Parser(source: String):
       }
     }
 
+  def parseFormalListWithImplicits: ParseResult[(List[(String, Expr)], List[(String, Expr)])] =
+    matchAhead(LeftParen()) flatMap { _ =>
+      if peekType == RightParen() then
+        step()
+        Right((Nil, Nil))
+      else
+        val isImp =
+          if peekType == Using() then
+            step()
+            true
+          else false
+        val result = parseFormal flatMap { arg1 =>
+          def parseMoreFormal: ParseResult[(String, Expr)] =
+            matchAhead(Comma()) flatMap { _ => parseFormal }
+          parseMany(Comma(), () => parseMoreFormal) flatMap { args => matchAhead(RightParen()).map(_ => arg1 :: args) }
+        }
+        if isImp then
+          result flatMap { imps => parseFormalListOptional.map(args => (imps, args)) }
+        else result.map(x => (x, Nil))
+    }
+
   def parseFormalList: ParseResult[List[(String, Expr)]] =
     matchAhead(LeftParen()) flatMap { _ =>
       if peekType == RightParen() then
@@ -207,21 +278,22 @@ class Parser(source: String):
         }
     }
 
-  def makePiType(args: List[(String, Expr)], resTyp: Expr): Expr =
+  def makePiType(args: List[(String, Expr)], resTyp: Expr, isImp: Boolean = false): Expr =
     @annotation.tailrec def recur(xs: List[(String, Expr)], acc: Expr): Expr =
       xs match
         case Nil => acc
-        case (argName, argTyp) :: xs => recur(xs, Pi(argName, argTyp, acc))
+        case (argName, argTyp) :: xs => recur(xs, Pi(argName, argTyp, acc, isImp))
     recur(args.reverse, resTyp)
 
   def parseDataCon: ParseResult[ConsDef] =
     matchAhead(Case()) flatMap { _ =>
       parseIdentifier flatMap { case Token(_, name) =>
         step()
-        parseFormalList flatMap { formals =>
+        parseFormalListWithImplicits flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr map { resTyp =>
-              ConsDef(name, makePiType(formals, resTyp))
+              val sig = makePiType(formals, makePiType(iformals, resTyp, isImp = true))
+              ConsDef(name, sig)
             }
           }
         }
@@ -233,14 +305,20 @@ class Parser(source: String):
       parseFormalList
     else Right(Nil)
 
+  def parseFormalListWithImplicitsOptional: ParseResult[(List[(String, Expr)], List[(String, Expr)])] =
+    if peekType == LeftParen() then
+      parseFormalListWithImplicits
+    else Right((Nil, Nil))
+
   def parseDataDef: ParseResult[DataDef] =
     matchAhead(Enum()) flatMap { _ =>
       parseIdentifier flatMap { case Token(_, name) =>
         step()
-        parseFormalListOptional flatMap { formals =>
+        parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr flatMap { resTyp =>
-              val sig = makePiType(formals, resTyp)
+              val sig0 = makePiType(iformals, resTyp, isImp = true)
+              val sig = makePiType(formals, sig0)
               matchAhead(Colon()) flatMap { _ =>
                 parseMany(Case(), () => parseDataCon) map { conss =>
                   DataDef(name, sig, conss)

@@ -12,6 +12,7 @@ case class RightBrace() extends TokenType
 
 // arrows
 case class Arrow() extends TokenType
+case class QuestionArrow() extends TokenType
 case class DoubleArrow() extends TokenType
 
 // equals
@@ -29,6 +30,7 @@ case class Def() extends TokenType
 case class Match() extends TokenType
 case class Println() extends TokenType
 case class ThreeQuestionMarks() extends TokenType
+case class Using() extends TokenType
 
 // literals
 case class NatNum(i: Int) extends TokenType

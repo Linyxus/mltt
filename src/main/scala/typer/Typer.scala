@@ -122,6 +122,8 @@ class Typer extends ConstraintSolving:
   def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
     (tp1, tp2) match
       case (tp1, tp2) if tp1 == tp2 => Right(())
+      case (tpd.PiElim(fun1, arg1), tpd.PiElim(fun2, arg2)) =>
+        compareTypes(fun1, fun2) flatMap { _ => compareTypes(arg1, arg2) }
       case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
         compareTypes(argTyp1, argTyp2) flatMap { _ =>
           val sym = ParamSymbol(argName2, argTyp2)
@@ -161,21 +163,21 @@ class Typer extends ConstraintSolving:
       case None =>
         Left(s"unknown variable $name")
     }
-    case Apply(expr, args) => typedApply(expr, args)
-    case ApplyTypeCon(name, args) =>
+    case Apply(expr, args, imp) => typedApply(expr, args)
+    case ApplyTypeCon(name, iargs, args) =>
       ctx.lookupTypeConInfo(name) match
         case None => Left(s"unknown type constructor $name")
         case Some(tycon) => typedApplyTypeCon(tycon, args)
-    case ApplyDataCon(name, args) =>
+    case ApplyDataCon(name, iargs, args) =>
       def getExpectedTypeCon: Option[String] =
         pt match
-          case ApplyTypeCon(name, _) => Some(name)
+          case tpd.AppliedTypeCon(sym, _) => Some(sym.name)
           case _ => None
 
       ctx.lookupDataConInfo(name, getExpectedTypeCon) match
         case None => Left(s"unknown data constructor $name")
         case Some(con) => typedApplyDataCon(con, args)
-    case Pi(arg, typ, resTyp) => typedPi(arg, typ, resTyp)
+    case Pi(arg, typ, resTyp, _) => typedPi(arg, typ, resTyp)
     case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
     case e @ Match(scrutinee, cases) => typedMatch(e, pt)
     case e @ Type(l) => typedType(e, pt)
@@ -447,11 +449,11 @@ object Typer:
     def k(expr: Expr): Expr = substBinder(name, to, expr)
     expr match
       case Var(name1) => if name1 == name then to else Var(name1)
-      case Pi(arg, typ, resTyp) => if arg == name then expr else Pi(arg, k(typ), k(resTyp))
+      case Pi(arg, typ, resTyp, imp) => if arg == name then expr else Pi(arg, k(typ), k(resTyp), imp)
       case PiIntro(arg, body) => if arg == name then expr else PiIntro(arg, k(body))
-      case Apply(func, args) => Apply(k(func), args.map(k))
-      case ApplyTypeCon(name, args) => ApplyTypeCon(name, args.map(k))
-      case ApplyDataCon(name, args) => ApplyDataCon(name, args.map(k))
+      case Apply(func, args, imp) => Apply(k(func), args.map(k), imp)
+      case ApplyTypeCon(name, iargs, args) => ApplyTypeCon(name, iargs.map(k), args.map(k))
+      case ApplyDataCon(name, iargs, args) => ApplyDataCon(name, iargs.map(k), args.map(k))
       case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, k(body)) })
       case Type(level) => Type(k(level))
       case Level() => expr

@@ -71,6 +71,8 @@ class Tokenizer(source: String):
     "match" -> Match(),
     "println" -> Println(),
     "???" -> ThreeQuestionMarks(),
+    "?->" -> QuestionArrow(),
+    "using" -> Using(),
   )
 
   def expect(ch: Char): Boolean =

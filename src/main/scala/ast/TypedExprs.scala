@@ -57,7 +57,7 @@ object TypedExprs {
     override def withType(tp: Expr): this.type =
       assert(false)
       this
-    override def toString(): String = s"ValRef(${sym.name})"
+    override def toString(): String = s"ValRef(${sym.name}@${sym.symId})"
 
     def show: String = sym.name
   }
