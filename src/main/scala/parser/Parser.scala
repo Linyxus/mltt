@@ -22,6 +22,12 @@ class Parser(source: String):
       indentLevel -= 1
     tokens = tokens.tail
 
+  def lookAheadWith(tp: TokenType): ParseResult[Token] =
+    if eof then Left(s"expecting $tp but found end-of-file")
+    else
+      if tokens.tail.head.tp == tp then Right(tokens.tail.head)
+      else Left(s"expecting $tp but found ${tokens.tail.head.tp}")
+
   def eof: Boolean = peekType == EOF()
 
   def expect(tpe: TokenType): ParseResult[Token] =
@@ -63,11 +69,23 @@ class Parser(source: String):
       }
     }
 
+  def parseUnit: ParseResult[Unit] =
+    if peekType == LeftParen() then
+      lookAheadWith(RightParen()).map { _ =>
+        step()
+        step()
+        ()
+      }
+    else Left(s"expecting left paren, but found $peekType")
+
   def parseCaseDef: ParseResult[CaseDef] =
     matchAhead(Case()) flatMap { _ =>
       parsePattern flatMap { pat =>
         matchAhead(DoubleArrow()) flatMap { _ =>
-          parseExpr.map(CaseDef(pat, _))
+          parseUnit match
+            case Left(_) =>
+              parseExpr.map(x => CaseDef(pat, Some(x)))
+            case Right(_) => Right(CaseDef(pat, None))
         }
       }
     }

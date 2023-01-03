@@ -290,26 +290,45 @@ class Typer extends ConstraintSolving:
               addEquality(pat, scrutinee) flatMap { _ =>
                 addEquality(pat.tpe, scrutTyp)
               }
-            updateConstraint match
-              case Left(err) => println(s"impossible pattern: $err")
-              case _ =>
-            ctx.withBindings(paramSyms) {
-              typed(cdef.body, pt = pt) map { body =>
-                val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
-                val mapping: Map[ValSymbol, PatternBoundParamRef] = Map.from(paramSyms zip prefs)
-                val substitutor = new tpd.ExprMap:
-                  override def mapValRef(e: tpd.ValRef): tpd.Expr =
-                    mapping.get(e.sym) match
-                      case None => super.mapValRef(e)
-                      case Some(pref) => pref
-                val body1 = substitutor(body)
-                val argTyps = paramSyms.map(sym => substitutor(sym.info))
-                val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
-                val res = tpd.CaseDef(resPat, body1)
-                prefs.foreach(_.overwriteBinder(res))
-                res
-              }
-            }
+            val isImpossiblePattern: Boolean = updateConstraint.isLeft
+            // updateConstraint match
+            //   case Left(err) => println(s"impossible pattern: $err")
+            //   case _ =>
+            if isImpossiblePattern then
+              val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
+              val mapping: Map[ValSymbol, PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+              val substitutor = new tpd.ExprMap:
+                override def mapValRef(e: tpd.ValRef): tpd.Expr =
+                  mapping.get(e.sym) match
+                    case None => super.mapValRef(e)
+                    case Some(pref) => pref
+              val body1 = tpd.Wildcard().withType(pt)
+              val argTyps = paramSyms.map(sym => substitutor(sym.info))
+              val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
+              val res = tpd.CaseDef(resPat, body1)
+              prefs.foreach(_.overwriteBinder(res))
+              Right(res)
+            else
+              cdef.body match
+                case None => Left(s"${pat.show} is not an impossible pattern")
+                case Some(body) =>
+                  ctx.withBindings(paramSyms) {
+                    typed(body, pt = pt) map { body =>
+                      val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
+                      val mapping: Map[ValSymbol, PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+                      val substitutor = new tpd.ExprMap:
+                        override def mapValRef(e: tpd.ValRef): tpd.Expr =
+                          mapping.get(e.sym) match
+                            case None => super.mapValRef(e)
+                            case Some(pref) => pref
+                      val body1 = substitutor(body)
+                      val argTyps = paramSyms.map(sym => substitutor(sym.info))
+                      val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
+                      val res = tpd.CaseDef(resPat, body1)
+                      prefs.foreach(_.overwriteBinder(res))
+                      res
+                    }
+                  }
           }
           collectAll(e.cases.map(x => typedCase(x)(using ctx.fresh))).flatMap { cases =>
             val res = tpd.Match(scrutinee)
@@ -464,7 +483,7 @@ object Typer:
       case Apply(func, args, imp) => Apply(k(func), args.map(k), imp)
       case ApplyTypeCon(name, iargs, args) => ApplyTypeCon(name, iargs.map(k), args.map(k))
       case ApplyDataCon(name, iargs, args) => ApplyDataCon(name, iargs.map(k), args.map(k))
-      case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, k(body)) })
+      case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, body.map(k)) })
       case Type(level) => Type(k(level))
       case Level() => expr
       case LZero() => expr

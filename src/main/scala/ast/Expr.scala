@@ -33,7 +33,7 @@ case class ApplyTypeCon(name: String, iargs: List[Expr], args: List[Expr]) exten
 
 case class ApplyDataCon(name: String, iargs: List[Expr], args: List[Expr]) extends Expr
 
-case class CaseDef(pat: ApplyDataCon, body: Expr)
+case class CaseDef(pat: ApplyDataCon, body: Option[Expr])
 
 case class Match(scrutinee: Expr, cases: List[CaseDef]) extends Expr
 
