@@ -194,11 +194,11 @@ class Typer extends ConstraintSolving:
       case None =>
         Left(s"unknown variable $name")
     }
-    case Apply(expr, args, imp) => typedApply(expr, args, imp)
+    case Apply(expr, args, imp) => typedApply(expr, args, pt, imp)
     case ApplyTypeCon(name, iargs, args) =>
       ctx.lookupTypeConInfo(name) match
         case None => Left(s"unknown type constructor $name")
-        case Some(tycon) => typedApplyTypeCon(tycon, args)
+        case Some(tycon) => typedApplyTypeCon(tycon, iargs, args)
     case ApplyDataCon(name, iargs, args) =>
       def getExpectedTypeCon: Option[String] =
         pt match
@@ -207,7 +207,7 @@ class Typer extends ConstraintSolving:
 
       ctx.lookupDataConInfo(name, getExpectedTypeCon) match
         case None => Left(s"unknown data constructor $name")
-        case Some(con) => typedApplyDataCon(con, args)
+        case Some(con) => typedApplyDataCon(con, iargs, args)
     case Pi(arg, typ, resTyp, imp) => typedPi(arg, typ, resTyp, imp)
     case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
     case e @ Match(scrutinee, cases) => typedMatch(e, pt)
@@ -377,27 +377,29 @@ class Typer extends ConstraintSolving:
       case _ => acc
     recur(expr, Nil)
 
-  def typedApplyTypeCon(info: TypeConInfo, args: List[Expr])(using Context): TyperResult[tpd.Expr] =
-    if args.length == info.paramNum then
-      val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
-      typedApplyFunctionParams(dummy, args) map { res =>
-        val resTyp = res.tpe
-        val args = retriveAppliedArguments(res)
-        tpd.AppliedTypeCon(info.symbol, args).withType(resTyp)
-      }
-    else
-      Left(s"incorrect param num for type constructor ${info.name}")
+  def typedApplyTypeCon(info: TypeConInfo, iargs: List[Expr], args: List[Expr])(using Context): TyperResult[tpd.Expr] =
+    val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
+    val typedImpArgs = typedApplyFunctionParams(dummy, iargs, imp = true)
+    val typedAllArgs = typedImpArgs flatMap { fun0 => typedApplyFunctionParams(fun0, args, imp = false) }
+    typedAllArgs flatMap { res =>
+      normalise(res.tpe) match
+        case resTyp @ tpd.Type(_) =>
+          val args = retriveAppliedArguments(res)
+          Right(tpd.AppliedTypeCon(info.symbol, args).withType(resTyp))
+        case resTyp => Left(s"type constructor ${info.symbol} is not fully applied ($resTyp)")
+    }
 
-  def typedApplyDataCon(info: DataConInfo, args: List[Expr])(using Context): TyperResult[tpd.Expr] =
-    if args.length == info.paramNum then
-      val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
-      typedApplyFunctionParams(dummy, args) map { res =>
-        val resTyp = res.tpe
-        val args = retriveAppliedArguments(res)
-        tpd.AppliedDataCon(info.symbol, args).withType(resTyp)
-      }
-    else
-      Left(s"incorrect param num for data constructor ${info.name}")
+  def typedApplyDataCon(info: DataConInfo, iargs: List[Expr], args: List[Expr])(using Context): TyperResult[tpd.Expr] =
+    val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
+    val typedImpArgs = typedApplyFunctionParams(dummy, iargs, imp = true)
+    val typedAllArgs = typedImpArgs flatMap { fun0 => typedApplyFunctionParams(fun0, args, imp = false) }
+    typedApplyFunctionParams(dummy, args) flatMap { res =>
+      normalise(res.tpe) match
+        case resTyp @ tpd.AppliedTypeCon(_, _) =>
+          val args = retriveAppliedArguments(res)
+          Right(tpd.AppliedDataCon(info.symbol, args).withType(resTyp))
+        case resTyp => Left(s"data constructor ${info.symbol} is not fully applied ($resTyp)")
+    }
 
   def typedApplyFunction(fun: tpd.Expr, arg: tpd.Expr | Expr, imp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     normalise(fun.tpe) match
@@ -427,23 +429,32 @@ class Typer extends ConstraintSolving:
       case x :: xs => recur(xs, acc.flatMap(typedApplyFunction(_, x, imp)))
     recur(arg, Right(fun))
 
-  def typedApply(fun: Expr, args: List[Expr], isImp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
-    fun match
-      case Var(funcName) =>
-        ctx.lookup(funcName) match
-          case None => Left(s"unknown name: $funcName when typing apply")
-          case Some(info) => info match
-            case info: TypeConInfo => typedApplyTypeCon(info, args)
-            case info: DataConInfo => typedApplyDataCon(info, args)
-            case _ =>
-              typed(fun) flatMap { fun =>
-                typedApplyFunctionParams(fun, args, isImp)
-              }
-            case _ => Left(s"not supported: $info as the function in typedApply")
-      case _ =>
-        typed(fun) flatMap { fun =>
-          typedApplyFunctionParams(fun, args, isImp)
+  def typedApply(fun: Expr, args: List[Expr], pt: tpd.Expr | Null, isImp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
+    def expectedTypeCon: Option[String] =
+      if pt eq null then None else
+        normalise(pt) match
+          case tpd.AppliedTypeCon(tycon, _) => Some(tycon.name)
+          case _ => None
+    def lookupTypeCon(name: String): Option[TypeConInfo] = ctx.lookupTypeConInfo(name)
+    def lookupDataCon(name: String): Option[DataConInfo] = ctx.lookupDataConInfo(name, expectedTypeCon)
+    def tryApplyCon: Option[TyperResult[tpd.Expr]] =
+      val getArgs = fun match
+        case Apply(Var(conName), args1, isImp1) if !isImp && isImp1 => Some((conName, args1, args))
+        case Var(conName) => Some((conName, Nil, args))
+        case _ => None
+      getArgs flatMap { case (conName, iargs, args) =>
+        lookupTypeCon(conName) orElse lookupDataCon(conName) map {
+          case info: TypeConInfo =>
+            typedApplyTypeCon(info, iargs, args)
+          case info: DataConInfo =>
+            typedApplyDataCon(info, iargs, args)
         }
+      }
+    def typeAsFunction =
+      typed(fun) flatMap { fun =>
+        typedApplyFunctionParams(fun, args, isImp)
+      }
+    tryApplyCon getOrElse typeAsFunction
 
   def typedBlock(e: Block, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
     def recur(ds: List[DefDef], acc: List[ValDefSymbol], e: Expr)(using Context): TyperResult[tpd.Expr] =
