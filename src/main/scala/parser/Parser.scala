@@ -64,7 +64,7 @@ class Parser(source: String):
   def parsePattern: ParseResult[ApplyDataCon] =
     parseIdentifier flatMap { con =>
       step()
-      parseParamListWithImplicits map { (iargs, args) =>
+      parseParamListWithImplicitsOptional map { (iargs, args) =>
         ApplyDataCon(con.content, iargs.getOrElse(Nil), args.getOrElse(Nil))
       }
     }
@@ -152,6 +152,11 @@ class Parser(source: String):
           res.flatMap { args => parseParamListOptional.map(xs => (Some(args), xs)) }
         else res.map(xs => (None, Some(xs)))
     }
+
+  def parseParamListWithImplicitsOptional: ParseResult[(Option[List[Expr]], Option[List[Expr]])] =
+    if peekType == LeftParen() then
+      parseParamListWithImplicits
+    else Right(None, None)
 
   def parseParamListOptional: ParseResult[Option[List[Expr]]] =
     if peekType == LeftParen() then parseParamList.map(Some(_)) else Right(None)
@@ -307,7 +312,7 @@ class Parser(source: String):
     matchAhead(Case()) flatMap { _ =>
       parseIdentifier flatMap { case Token(_, name) =>
         step()
-        parseFormalListWithImplicits flatMap { (iformals, formals) =>
+        parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr map { resTyp =>
               val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)

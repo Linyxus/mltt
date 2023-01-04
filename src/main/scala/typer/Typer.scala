@@ -183,6 +183,50 @@ class Typer extends ConstraintSolving:
               typedApplyFunction(e, arg0, imp = true) flatMap { fun0 => adaptImplicit(fun0, tp2) }
         case _ => Right(e)
 
+  def lookupConstructor(name: String, pt: tpd.Expr | Null)(using Context): Option[TypeConInfo | DataConInfo] =
+    def expectedTypeCon: Option[String] =
+      if pt eq null then None else
+        normalise(pt) match
+          case tpd.AppliedTypeCon(sym, _) => Some(sym.name)
+          case _ => None
+    def lookupTypeCon: Option[TypeConInfo | DataConInfo] = ctx.lookupTypeConInfo(name)
+    def lookupDataCon: Option[TypeConInfo | DataConInfo] = ctx.lookupDataConInfo(name, expectedTypeCon)
+    lookupTypeCon orElse lookupDataCon
+
+  def adaptConstructor(name: String, pt: tpd.Expr | Null, errMsg: String)(using Context): TyperResult[tpd.Expr] =
+    def isAdaptableSig(sig: tpd.Expr): Boolean =
+      @annotation.tailrec def recur(sig: tpd.Expr): Boolean = sig match
+        case sig @ tpd.PiType(_, _, resTyp) => sig.isImplicitFunction && recur(resTyp)
+        case _ => true
+      recur(sig)
+    def adaptSig(con: TypeConSymbol | DataConSymbol, sig: tpd.Expr): TyperResult[tpd.Expr] =
+      def recur(e: tpd.Expr): TyperResult[tpd.Expr] = e.tpe match
+        case fun @ tpd.PiType(argName, argTyp, resTyp) =>
+          assert(fun.isImplicitFunction)
+          val arg0 = tpd.UVarRef(UVarInfo(ctx.freshen(argName), argTyp))
+          typedApplyFunction(e, arg0, imp = true) flatMap { fun0 =>
+            recur(fun0)
+          }
+        case _ => Right(e)
+      val dummy: tpd.Expr = tpd.Wildcard().withType(sig)
+      recur(dummy) map { adapted =>
+        val args = retriveAppliedArguments(adapted)
+        (con, normalise(adapted.tpe)) match
+          case (sym: TypeConSymbol, tpe @ tpd.Type(_)) => tpd.AppliedTypeCon(sym, args).withType(tpe)
+          case (sym: DataConSymbol, tpe @ tpd.AppliedTypeCon(_, _)) =>
+            tpd.AppliedDataCon(sym, args).withType(tpe)
+          case e => assert(false, e)
+      }
+
+    lookupConstructor(name, pt) match
+      case None => Left(errMsg)
+      case Some(info: TypeConInfo) =>
+        if isAdaptableSig(info.sig) then adaptSig(info.symbol, info.sig)
+        else Left(errMsg)
+      case Some(info: DataConInfo) =>
+        if isAdaptableSig(info.sig) then adaptSig(info.symbol, info.sig)
+        else Left(errMsg)
+
   def typed1(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] = e match
     case Var(name) => ctx.lookupVal(name) match {
       case Some(sym) =>
@@ -192,7 +236,8 @@ class Typer extends ConstraintSolving:
           res1
         )
       case None =>
-        Left(s"unknown variable $name")
+        adaptConstructor(name, pt, errMsg = s"unknown variable $name")
+        // Left(s"unknown variable $name")
     }
     case Apply(expr, args, imp) => typedApply(expr, args, pt, imp)
     case ApplyTypeCon(name, iargs, args) =>
@@ -293,21 +338,43 @@ class Typer extends ConstraintSolving:
           def typedPattern(pat: ApplyDataCon): TyperResult[(tpd.AppliedDataCon, List[ParamSymbol])] =
             ctx.lookupDataConInfo(pat.name, Some(tycon.name)) match
               case Some(dcon) =>
-                @annotation.tailrec def recur(args: List[Expr], accTyp: tpd.Expr, acc: List[ParamSymbol]): TyperResult[(tpd.AppliedDataCon, List[ParamSymbol])] =
-                  args match
-                    case Nil => accTyp match
-                      case tpe: tpd.AppliedTypeCon =>
-                        val args = acc.reverse.map(tpd.ValRef(_))
-                        Right((tpd.AppliedDataCon(dcon.symbol, args).withType(tpe), acc.reverse))
-                      case tp => Left(s"incorrect number of arguments in pattern $pat")
-                    case Var(name) :: args => accTyp match
-                      case binder @ tpd.PiType(argName, argTyp, resTyp) =>
-                        val sym = ParamSymbol(name, argTyp)
-                        val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
-                        recur(args, nextTyp, sym :: acc)
-                      case other => Left(s"incorrect number of arguments in pattern $pat")
-                    case exp :: args => Left(s"ill-formed pattern: $pat")
-                recur(pat.args, dcon.sig, Nil)
+                @annotation.tailrec def recur(iargs: List[Expr], args: List[Expr], accTyp: tpd.Expr, acc: List[ParamSymbol]): TyperResult[(tpd.AppliedDataCon, List[ParamSymbol])] =
+                  iargs match
+                    case Var(name) :: iargs =>
+                      accTyp match
+                        case binder @ tpd.PiType(argName, argTyp, resTyp) =>
+                          if binder.isImplicitFunction then
+                            val sym = ParamSymbol(name, argTyp)
+                            val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
+                            recur(iargs, args, nextTyp, sym :: acc)
+                          else Left(s"too many implicits arguments in pattern $pat")
+                        case _ =>
+                          Left(s"too many arguments in pattern $pat")
+                    case e :: iargs => Left(s"ill-formed pattern: $pat")
+                    case Nil =>
+                      args match
+                        case Nil => accTyp match
+                          case tpe: tpd.AppliedTypeCon =>
+                            val args = acc.reverse.map(tpd.ValRef(_))
+                            Right((tpd.AppliedDataCon(dcon.symbol, args).withType(tpe), acc.reverse))
+                          case binder @ tpd.PiType(argName, argTyp, resTyp) if binder.isImplicitFunction =>
+                            val sym = ParamSymbol(ctx.freshen(argName), argTyp)
+                            val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
+                            recur(Nil, Nil, nextTyp, sym :: acc)
+                          case _ => Left(s"incorrect number of arguments in pattern $pat")
+                        case allArgs @ (Var(name) :: args) => accTyp match
+                          case binder @ tpd.PiType(argName, argTyp, resTyp) =>
+                            if binder.isImplicitFunction then
+                              val sym = ParamSymbol(ctx.freshen(argName), argTyp)
+                              val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
+                              recur(Nil, allArgs, nextTyp, sym :: acc)
+                            else
+                              val sym = ParamSymbol(name, argTyp)
+                              val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
+                              recur(Nil, args, nextTyp, sym :: acc)
+                          case other => Left(s"incorrect number of arguments in pattern $pat")
+                        case exp :: args => Left(s"ill-formed pattern: $pat")
+                recur(pat.iargs, pat.args, dcon.sig, Nil)
               case None => Left(s"unknown data constructor ${pat.name}")
           def typedCase(cdef: CaseDef)(using Context): TyperResult[tpd.CaseDef] = typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
             def updateConstraint: TyperResult[Unit] =
