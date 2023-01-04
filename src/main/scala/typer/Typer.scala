@@ -24,6 +24,17 @@ class Typer extends ConstraintSolving:
   def constraint(using Context): EqConstraint = ctx.constraint
   def constraint_=(c: EqConstraint)(using Context): Unit = ctx.constraint = c
 
+  def trackingUVar[T](op: => TyperResult[T])(using Context): TyperResult[T] =
+    ctx.enterUVarScope
+    val result = op
+    val newScope = ctx.uvarScope
+    ctx.rollbackUVarScope
+    result.flatMap { res =>
+      newScope.checkUninstantiated match
+        case Nil => Right(res)
+        case xs => Left(s"uninstantiated unification variables: ${xs.map(_.name)}")
+    }
+
   def typedDataDef(ddef: DataDef)(using Context): TyperResult[TypeConInfo] =
     def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
       case tpd.Type(l) => Right(())
@@ -376,50 +387,52 @@ class Typer extends ConstraintSolving:
                         case exp :: args => Left(s"ill-formed pattern: $pat")
                 recur(pat.iargs, pat.args, dcon.sig, Nil)
               case None => Left(s"unknown data constructor ${pat.name}")
-          def typedCase(cdef: CaseDef)(using Context): TyperResult[tpd.CaseDef] = typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
-            def updateConstraint: TyperResult[Unit] =
-              addEquality(pat, scrutinee) flatMap { _ =>
-                addEquality(pat.tpe, scrutTyp)
-              }
-            val isImpossiblePattern: Boolean = updateConstraint.isLeft
-            // updateConstraint match
-            //   case Left(err) => println(s"impossible pattern: $err")
-            //   case _ =>
-            if isImpossiblePattern then
-              val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
-              val mapping: Map[ValSymbol, tpd.PatternBoundParamRef] = Map.from(paramSyms zip prefs)
-              val substitutor = new tpd.ExprMap:
-                override def mapValRef(e: tpd.ValRef): tpd.Expr =
-                  mapping.get(e.sym) match
-                    case None => super.mapValRef(e)
-                    case Some(pref) => pref
-              val body1 = tpd.Wildcard().withType(pt)
-              val argTyps = paramSyms.map(sym => substitutor(sym.info))
-              val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
-              val res = tpd.CaseDef(resPat, body1)
-              prefs.foreach(_.overwriteBinder(res))
-              Right(res)
-            else
-              cdef.body match
-                case None => Left(s"${pat.show} is not an impossible pattern")
-                case Some(body) =>
-                  ctx.withBindings(paramSyms) {
-                    typed(body, pt = pt) map { body =>
-                      val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
-                      val mapping: Map[ValSymbol, tpd.PatternBoundParamRef] = Map.from(paramSyms zip prefs)
-                      val substitutor = new tpd.ExprMap:
-                        override def mapValRef(e: tpd.ValRef): tpd.Expr =
-                          mapping.get(e.sym) match
-                            case None => super.mapValRef(e)
-                            case Some(pref) => pref
-                      val body1 = substitutor(body)
-                      val argTyps = paramSyms.map(sym => substitutor(sym.info))
-                      val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
-                      val res = tpd.CaseDef(resPat, body1)
-                      prefs.foreach(_.overwriteBinder(res))
-                      res
+          def typedCase(cdef: CaseDef)(using Context): TyperResult[tpd.CaseDef] = trackingUVar {
+            typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
+              def updateConstraint: TyperResult[Unit] =
+                addEquality(pat, scrutinee) flatMap { _ =>
+                  addEquality(pat.tpe, scrutTyp)
+                }
+              val isImpossiblePattern: Boolean = updateConstraint.isLeft
+              // updateConstraint match
+              //   case Left(err) => println(s"impossible pattern: $err")
+              //   case _ =>
+              if isImpossiblePattern then
+                val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
+                val mapping: Map[ValSymbol, tpd.PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+                val substitutor = new tpd.ExprMap:
+                  override def mapValRef(e: tpd.ValRef): tpd.Expr =
+                    mapping.get(e.sym) match
+                      case None => super.mapValRef(e)
+                      case Some(pref) => pref
+                val body1 = tpd.Wildcard().withType(pt)
+                val argTyps = paramSyms.map(sym => substitutor(sym.info))
+                val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
+                val res = tpd.CaseDef(resPat, body1)
+                prefs.foreach(_.overwriteBinder(res))
+                Right(res)
+              else
+                cdef.body match
+                  case None => Left(s"${pat.show} is not an impossible pattern")
+                  case Some(body) =>
+                    ctx.withBindings(paramSyms) {
+                      typed(body, pt = pt) map { body =>
+                        val prefs = paramSyms.zipWithIndex.map((_, i) => tpd.PatternBoundParamRef(i))
+                        val mapping: Map[ValSymbol, tpd.PatternBoundParamRef] = Map.from(paramSyms zip prefs)
+                        val substitutor = new tpd.ExprMap:
+                          override def mapValRef(e: tpd.ValRef): tpd.Expr =
+                            mapping.get(e.sym) match
+                              case None => super.mapValRef(e)
+                              case Some(pref) => pref
+                        val body1 = substitutor(body)
+                        val argTyps = paramSyms.map(sym => substitutor(sym.info))
+                        val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
+                        val res = tpd.CaseDef(resPat, body1)
+                        prefs.foreach(_.overwriteBinder(res))
+                        res
+                      }
                     }
-                  }
+            }
           }
           collectAll(e.cases.map(x => typedCase(x)(using ctx.fresh))).flatMap { cases =>
             val res = tpd.Match(scrutinee)
@@ -552,7 +565,7 @@ class Typer extends ConstraintSolving:
               }
     recur(e.ddefs, Nil, e.expr)
 
-  def typedDefinition(d: Definition)(using Context): TyperResult[Unit] =
+  def typedDefinition(d: Definition)(using Context): TyperResult[Unit] = trackingUVar {
     d match
       case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
       case ddef: DefDef => typedDefDef(ddef) map { info => ctx.addValInfo(info) }
@@ -560,6 +573,7 @@ class Typer extends ConstraintSolving:
         println(Reducer.reduce(te).show)
       }
       case _ => Left(s"unsupported: $d")
+  }
 
   def typedProgram(defs: List[Definition])(using Context): TyperResult[Unit] =
     def recur(ds: List[Definition]): TyperResult[Unit] =

@@ -2,8 +2,22 @@ import driver.Driver._
 
 @main def run(): Unit = {
   val source = """
+enum Nat extends Type:
+  case Zero extends Nat
+  case Succ(n: Nat) extends Nat
+
 enum Eq(using A: Type)(a: A, b: A) extends Type:
-  case Refl(using A: Type, a: A) extends Eq(a, a)
+  case refl(using A: Type, a: A) extends Eq(a, a)
+
+def symm(using A: Type, a: A, b: A)(eq: Eq(a, b)): Eq(b, a) = eq match
+  case refl => refl
+
+def trans(using A: Type, a: A, b: A, c: A)(eq1: Eq(a, b), eq2: Eq(b, c)): Eq(a, c) = eq1 match
+  case refl => eq2 match
+    case refl => refl
+
+def cong(using A: Type, B: Type, a: A, b: A)(eq: Eq(a, b), f: (x: A) -> B): Eq(f(a), f(b)) = eq match
+  case refl => refl
 """
   val source1 = """
 enum Nat extends Type:

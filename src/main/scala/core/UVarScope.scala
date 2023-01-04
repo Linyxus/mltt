@@ -1,8 +1,13 @@
 package core
 
-class UVarScope(parent: UVarScope | Null, trackedUVars: List[UVarInfo]) {
-  def track(info: UVarInfo): UVarScope = UVarScope(parent, info :: trackedUVars)
+class UVarScope(val parent: UVarScope | Null) {
+  private var trackedUVars: List[UVarInfo] = Nil
+
+  def track(info: UVarInfo): Unit =
+    trackedUVars = info :: trackedUVars
   def checkUninstantiated: List[UVarInfo] =
     trackedUVars.filterNot(_.instantiated)
+
+  override def toString: String = s"UVarScope($trackedUVars)"
 }
 
