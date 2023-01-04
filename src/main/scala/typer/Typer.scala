@@ -291,6 +291,9 @@ class Typer extends ConstraintSolving:
         println(ctx.constraint.show ++ "\n")
         Right(tpd.Wildcard().withType(pt))
     case e: Block => typedBlock(e, pt)
+    case OmittedType =>
+      val tp0 = tpd.UVarRef(UVarInfo(ctx.freshen("resultType"), tpd.Type(tpd.LZero())))
+      Right(tp0)
     case _ => Left(s"not supported: typed($e)")
 
   def typedType(e: Type, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
@@ -629,6 +632,7 @@ object Typer:
               else recur(ds, ddef1 :: acc, e)
         recur(ddefs, Nil, e)
       case Wildcard => Wildcard
+      case OmittedType => OmittedType
 
   def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr): tpd.Expr =
     val treeMap = new tpd.ExprMap:

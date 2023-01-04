@@ -380,19 +380,22 @@ class Parser(source: String):
       parseIdentifier flatMap { case Token(_, defname) =>
         step()
         parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
-          matchAhead(Colon()) flatMap { _ =>
-            parseExpr flatMap { resTyp =>
-              val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)
-              if peekType == Equal() then
-                matchAhead(Equal()) flatMap { _ =>
-                  parseExpr map { body =>
-                    val args = iformals.map(_._1) ++ formals.map(_._1)
-                    val term = makePiIntro(args, body)
-                    DefDef(defname, sig, Some(term))
-                  }
+          def parseResultType: ParseResult[Option[Expr]] =
+            if peekType == Colon() then
+              matchAhead(Colon()).flatMap(_ => parseExpr.map(Some(_)))
+            else Right(None)
+          parseResultType flatMap { resTypOpt =>
+            val resTyp = resTypOpt.getOrElse(OmittedType)
+            val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)
+            if peekType == Equal() then
+              matchAhead(Equal()) flatMap { _ =>
+                parseExpr map { body =>
+                  val args = iformals.map(_._1) ++ formals.map(_._1)
+                  val term = makePiIntro(args, body)
+                  DefDef(defname, sig, Some(term))
                 }
-              else Right(DefDef(defname, sig, None))
-            }
+              }
+            else Right(DefDef(defname, sig, None))
           }
         }
       }

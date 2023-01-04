@@ -18,6 +18,7 @@ sealed trait Expr {
     case LLub(l1, l2) => s"$l1 ⊔ $l2"
     case Undefined() => "???"
     case Wildcard => "_"
+    case OmittedType => "<?>"
     case Block(ddefs, expr) => s"Block($ddefs, $expr)"
 }
 
@@ -52,4 +53,6 @@ case class Type(level: Expr) extends Expr
 case class Undefined() extends Expr
 
 case object Wildcard extends Expr
+
+case object OmittedType extends Expr
 

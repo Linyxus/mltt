@@ -17,6 +17,6 @@ class UVarInfo(using Context)(val name: String, val typ: Expr) {
 
   override def toString(): String =
     if instantiated then s"[$instance]"
-    else s"VarInfo($name, $typ)"
+    else s"UVarInfo($name, $typ)"
 }
 

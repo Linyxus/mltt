@@ -136,7 +136,8 @@ class Reducer(using Context) extends ExprMap:
                   reduced(body2)
                 else recur(cdefs)
           recur(e.cases)
-        case _ => assert(false)
+        case _ =>
+          assert(false, scrut)
   }
 
   override def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
@@ -195,6 +196,9 @@ object Reducer:
     case ValRef(sym) => sym match
       case ParamSymbol(myName, myInfo) => true
       case ValDefSymbol(myName) => false
+    case UVarRef(uinfo) =>
+      if uinfo.instantiated then isNeutralExpr(uinfo.instance)
+      else true
     case PiTypeParamRef() => true
     case PiIntroParamRef() => true
     case PiElim(func, arg) =>
