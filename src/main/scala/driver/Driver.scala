@@ -13,7 +13,7 @@ object Driver:
         val ctx = new Context
         typer.typedProgram(defs)(using ctx) match
           case Left(err) => Some(err)
-          case _ => None
+          case Right(typed) => None
 
   def readFile(path: String): String =
     val content = io.Source.fromFile(path).getLines.mkString("\n")

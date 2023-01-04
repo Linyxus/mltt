@@ -15,6 +15,8 @@ class Context:
   private var bindings: Map[String, ValSymbol] = Map.empty
   private var myConstr: EqConstraint = EqConstraint.empty
   private var localSyms: Set[ValDefSymbol] = Set.empty
+  private var currentUVarScope: UVarScope = new UVarScope(null, Nil)
+  private var freshCounter: Int = 0
 
   def fresh: Context =
     val freshCtx = new Context
@@ -23,7 +25,22 @@ class Context:
     freshCtx.bindings = bindings
     freshCtx.myConstr = myConstr
     freshCtx.localSyms = localSyms
+    freshCtx.currentUVarScope = currentUVarScope
+    freshCtx.freshCounter = freshCounter
     freshCtx
+
+  def freshen(x: String): String =
+    freshCounter += 1
+    x + "$" + freshCounter.toString
+
+  def trackUVarInfo(info: UVarInfo): Unit =
+    currentUVarScope = currentUVarScope.track(info)
+
+  def withinNewUVarScope[T](op: => T): T =
+    val saved = currentUVarScope
+    val result = op
+    currentUVarScope = saved
+    result
 
   def constraint: EqConstraint = myConstr
 

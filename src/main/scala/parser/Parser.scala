@@ -280,7 +280,7 @@ class Parser(source: String):
         }
         if isImp then
           result flatMap { imps => parseFormalListOptional.map(args => (imps, args)) }
-        else result.map(x => (x, Nil))
+        else result.map(x => (Nil, x))
     }
 
   def parseFormalList: ParseResult[List[(String, Expr)]] =
@@ -310,7 +310,7 @@ class Parser(source: String):
         parseFormalListWithImplicits flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr map { resTyp =>
-              val sig = makePiType(formals, makePiType(iformals, resTyp, isImp = true))
+              val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)
               ConsDef(name, sig)
             }
           }
@@ -335,8 +335,8 @@ class Parser(source: String):
         parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr flatMap { resTyp =>
-              val sig0 = makePiType(iformals, resTyp, isImp = true)
-              val sig = makePiType(formals, sig0)
+              val sig0 = makePiType(formals, resTyp)
+              val sig = makePiType(iformals, sig0, isImp = true)
               matchAhead(Colon()) flatMap { _ =>
                 parseMany(Case(), () => parseDataCon) map { conss =>
                   DataDef(name, sig, conss)
@@ -374,14 +374,15 @@ class Parser(source: String):
     matchAhead(Def()) flatMap { _ =>
       parseIdentifier flatMap { case Token(_, defname) =>
         step()
-        parseFormalListOptional flatMap { formals =>
+        parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           matchAhead(Colon()) flatMap { _ =>
             parseExpr flatMap { resTyp =>
-              val sig = makePiType(formals, resTyp)
+              val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)
               if peekType == Equal() then
                 matchAhead(Equal()) flatMap { _ =>
                   parseExpr map { body =>
-                    val term = makePiIntro(formals.map(_._1), body)
+                    val args = iformals.map(_._1) ++ formals.map(_._1)
+                    val term = makePiIntro(args, body)
                     DefDef(defname, sig, Some(term))
                   }
                 }

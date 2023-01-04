@@ -66,5 +66,5 @@ def addComm(n: Nat, m: Nat): Eq(Nat, add(n, m), add(m, n)) = n match
 def addAssoc(a: Nat, b: Nat, c: Nat): Eq(Nat, add(a, add(b, c)), add(add(a, b), c)) =
   a match
     case Zero() => Refl(Nat, add(b, c))
-    case Succ(a0) => 
+    case Succ(a0) =>
       cong(Nat, Nat, add(a0, add(b, c)), add(add(a0, b), c), x => Succ(x), addAssoc(a0, b, c))

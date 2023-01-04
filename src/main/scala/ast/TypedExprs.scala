@@ -1,6 +1,7 @@
 package ast
 
 import core.Symbols._
+import core.UVarInfo
 // import ast.Level
 
 object TypedExprs {
@@ -62,6 +63,13 @@ object TypedExprs {
     def show: String = sym.name
   }
 
+  case class UVarRef(info: UVarInfo) extends Expr {
+    override def tpe: Expr = info.typ
+    override def withType(tp: Expr): this.type = assert(false)
+
+    def show: String = info.name
+  }
+
   case class PiType(argName: String, argTyp: Expr, resTyp: Expr) extends BinderExpr {
     def computeType: Type =
       (argTyp.tpe, resTyp.tpe) match
@@ -70,9 +78,15 @@ object TypedExprs {
 
     def withType(): this.type = withType(computeType)
 
-    override def toString(): String = s"PiType@${hashCode()}($argName, $argTyp, $resTyp)"
+    override def toString(): String = s"PiType@${hashCode()}($argName, $argTyp, $resTyp, isImplicit = $isImplicit)"
 
     def show: String = s"(($argName: ${argTyp.show}) -> ${resTyp.show})"
+
+    private var isImplicit: Boolean = false
+    def asImplicit: this.type =
+      isImplicit = true
+      this
+    def isImplicitFunction: Boolean = isImplicit
   }
   case class PiTypeParamRef() extends Expr with ParamRef {
     type BinderType = PiType
@@ -234,6 +248,8 @@ object TypedExprs {
             traverse(e.tpe)
       e match
         case ValRef(sym) => ()
+        case UVarRef(info) =>
+          info.instanceOpt.map(traverse)
         case PiType(argName, argTyp, resTyp) =>
           traverse(argTyp)
           traverse(resTyp)
@@ -276,6 +292,9 @@ object TypedExprs {
     def traverseValRef(e: ValRef): Unit =
       traverseSubtrees(e)
 
+    def traverseUVarRef(e: UVarRef): Unit =
+      traverseSubtrees(e)
+
     def traversePiType(e: PiType): Unit = traverseSubtrees(e)
 
     def traversePiTypeParamRef(e: PiTypeParamRef): Unit = traverseSubtrees(e)
@@ -315,6 +334,7 @@ object TypedExprs {
 
     def traverse(e: Expr): Unit = e match
       case e @ ValRef(sym) => traverseValRef(e)
+      case e @ UVarRef(_) => traverseUVarRef(e)
       case e @ PiType(argName, argTyp, resTyp) => traversePiType(e)
       case e @ PiTypeParamRef() => traversePiTypeParamRef(e)
       case e @ PiIntro(argName, argTyp) => traversePiIntro(e)
@@ -361,10 +381,15 @@ object TypedExprs {
 
     def mapValRef(e: ValRef): Expr = e
 
+    def mapUVarRef(e: UVarRef): Expr =
+      if e.info.instantiated then this(e.info.instance)
+      else e
+
     def mapPiType(e: PiType): Expr =
       val res = PiType(e.argName, this(e.argTyp), this(e.resTyp)).withType(this(e.tpe))
       // updatePiTypeParamRef(e, res, res.resTyp)
-      res.overwriteId(e.exprId)
+      val result = res.overwriteId(e.exprId)
+      if e.isImplicitFunction then result.asImplicit else result
 
     def mapPiTypeParamRef(e: PiTypeParamRef): Expr = e.copy().overwriteBinder(e.binder)
 
@@ -416,6 +441,7 @@ object TypedExprs {
     def apply(t: Expr): Expr =
       val result = t match
         case e @ ValRef(sym) => mapValRef(e)
+        case e @ UVarRef(_) => mapUVarRef(e)
         case e @ PiType(argName, argTyp, resTyp) =>
           mapPiType(e)
         case e @ PiTypeParamRef() =>

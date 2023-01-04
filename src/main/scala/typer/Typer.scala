@@ -126,6 +126,15 @@ class Typer extends ConstraintSolving:
   def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
     (tp1, tp2) match
       case (tp1, tp2) if tp1 == tp2 => Right(())
+      case (tp1, tp2: tpd.UVarRef) =>
+        if tp2.info.instantiated then compareTypes(tp1, tp2.info.instance)
+        else
+          tp2.info.instantiate(tp1)
+          Right(())
+      case (tp1: tpd.UVarRef, tp2) => compareTypes(tp2, tp1)
+      case (tpd.AppliedTypeCon(tycon1, args1), tpd.AppliedTypeCon(tycon2, args2)) =>
+        if tycon1 eq tycon2 then collectAll(args1 zip args2 map { (a1, a2) => compareTypes(a1, a2) }).map(_ => ())
+        else Left(s"mismatched type constructor: $tycon1 and $tycon2")
       case (tpd.PiElim(fun1, arg1), tpd.PiElim(fun2, arg2)) =>
         compareTypes(fun1, fun2) flatMap { _ => compareTypes(arg1, arg2) }
       case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
@@ -161,13 +170,31 @@ class Typer extends ConstraintSolving:
       }
     }
 
+  def adaptImplicit(e: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[tpd.Expr] =
+    pt match
+      case null => Right(e)
+      case pt: tpd.Expr => normalise(e.tpe) match
+        case tp1 @ tpd.PiType(arg1, typ1, resTyp1) if tp1.isImplicitFunction =>
+          val tp2 = normalise(pt)
+          tp2 match
+            case tp2 @ tpd.PiType(_, _, _) if tp2.isImplicitFunction => Right(e)
+            case _ =>
+              val arg0 = tpd.UVarRef(UVarInfo(arg1, typ1))
+              typedApplyFunction(e, arg0, imp = true) flatMap { fun0 => adaptImplicit(fun0, tp2) }
+        case _ => Right(e)
+
   def typed1(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] = e match
     case Var(name) => ctx.lookupVal(name) match {
-      case Some(sym) => Right(tpd.ValRef(sym))
+      case Some(sym) =>
+        val res = tpd.ValRef(sym)
+        adaptImplicit(res, pt).map(res1 =>
+          // println(s"adapting $res (${res.tpe}), pt = $pt ===> $res1")
+          res1
+        )
       case None =>
         Left(s"unknown variable $name")
     }
-    case Apply(expr, args, imp) => typedApply(expr, args)
+    case Apply(expr, args, imp) => typedApply(expr, args, imp)
     case ApplyTypeCon(name, iargs, args) =>
       ctx.lookupTypeConInfo(name) match
         case None => Left(s"unknown type constructor $name")
@@ -181,7 +208,7 @@ class Typer extends ConstraintSolving:
       ctx.lookupDataConInfo(name, getExpectedTypeCon) match
         case None => Left(s"unknown data constructor $name")
         case Some(con) => typedApplyDataCon(con, args)
-    case Pi(arg, typ, resTyp, _) => typedPi(arg, typ, resTyp)
+    case Pi(arg, typ, resTyp, imp) => typedPi(arg, typ, resTyp, imp)
     case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
     case e @ Match(scrutinee, cases) => typedMatch(e, pt)
     case e @ Type(l) => typedType(e, pt)
@@ -220,7 +247,7 @@ class Typer extends ConstraintSolving:
         if e eq from then to else super.mapPiIntroParamRef(e)
     treeMap(tp)
 
-  def typedPi(argName: String, argTyp: Expr, resTyp: Expr)(using Context): TyperResult[tpd.Expr] =
+  def typedPi(argName: String, argTyp: Expr, resTyp: Expr, isImp: Boolean)(using Context): TyperResult[tpd.Expr] =
     typed(argTyp) flatMap { argTyp1 =>
       normalise(argTyp1.tpe) match
         case tpd.Type(l1) =>
@@ -235,7 +262,7 @@ class Typer extends ConstraintSolving:
                 val resTyp2 = abstractSymbol(sym, pref, resTyp1)
                 val binder = tpd.PiType(argName, argTyp1, resTyp2).withType(tpd.Type(l))
                 pref.overwriteBinder(binder)
-                Right(binder)
+                Right(if isImp then binder.asImplicit else binder)
               case _ => Left(s"return type $resTyp1 is not a type")
           }
         case _ => Left(s"cannot abstract over $argTyp1 (${argTyp1.tpe.show})")
@@ -372,22 +399,35 @@ class Typer extends ConstraintSolving:
     else
       Left(s"incorrect param num for data constructor ${info.name}")
 
-  def typedApplyFunction(fun: tpd.Expr, arg: Expr)(using Context): TyperResult[tpd.Expr] =
+  def typedApplyFunction(fun: tpd.Expr, arg: tpd.Expr | Expr, imp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     normalise(fun.tpe) match
       case funType @ tpd.PiType(argName, typ, resTyp) =>
-        typed(arg, typ) map { arg =>
-          val tpe = substBinder(funType, arg, resTyp)
-          tpd.PiElim(fun, arg).withType(tpe)
-        }
+        if !funType.isImplicitFunction && imp then
+          Left(s"function of ${funType.show} does not take implicit arguments")
+        else if funType.isImplicitFunction && !imp then
+          val info = UVarInfo(ctx.freshen(argName), typ)
+          val arg0 = tpd.UVarRef(info)
+          typedApplyFunction(fun, arg0, imp = true) flatMap { fun0 =>
+            // println(s"completing implicit: ${fun0.show}")
+            typedApplyFunction(fun0, arg)
+          }
+        else
+          def typedArg: TyperResult[tpd.Expr] = arg match
+            case arg: tpd.Expr => Right(arg)
+            case arg: Expr => typed(arg, typ)
+          typedArg map { arg =>
+            val tpe = substBinder(funType, arg, resTyp)
+            tpd.PiElim(fun, arg).withType(tpe)
+          }
       case _ => Left(s"cannot apply value $fun of type ${fun.tpe}")
 
-  def typedApplyFunctionParams(fun: tpd.Expr, arg: List[Expr])(using Context): TyperResult[tpd.Expr] =
+  def typedApplyFunctionParams(fun: tpd.Expr, arg: List[Expr], imp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     def recur(xs: List[Expr], acc: TyperResult[tpd.Expr]): TyperResult[tpd.Expr] = xs match
       case Nil => acc
-      case x :: xs => recur(xs, acc.flatMap(typedApplyFunction(_, x)))
+      case x :: xs => recur(xs, acc.flatMap(typedApplyFunction(_, x, imp)))
     recur(arg, Right(fun))
 
-  def typedApply(fun: Expr, args: List[Expr])(using Context): TyperResult[tpd.Expr] =
+  def typedApply(fun: Expr, args: List[Expr], isImp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     fun match
       case Var(funcName) =>
         ctx.lookup(funcName) match
@@ -397,12 +437,12 @@ class Typer extends ConstraintSolving:
             case info: DataConInfo => typedApplyDataCon(info, args)
             case _ =>
               typed(fun) flatMap { fun =>
-                typedApplyFunctionParams(fun, args)
+                typedApplyFunctionParams(fun, args, isImp)
               }
             case _ => Left(s"not supported: $info as the function in typedApply")
       case _ =>
         typed(fun) flatMap { fun =>
-          typedApplyFunctionParams(fun, args)
+          typedApplyFunctionParams(fun, args, isImp)
         }
 
   def typedBlock(e: Block, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =

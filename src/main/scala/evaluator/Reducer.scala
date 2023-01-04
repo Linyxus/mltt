@@ -50,6 +50,10 @@ class Reducer(using Context) extends ExprMap:
           case None => nonReduced(e)
           case Some(e) => this(e)
 
+  override def mapUVarRef(e: UVarRef): Expr =
+    if e.info.instantiated then this(e.info.instance)
+    else nonReduced(e)
+
   override def mapPiType(e: PiType): Expr = checkReduction {
     super.mapPiType(e)
   }
