@@ -2,6 +2,8 @@ import driver.Driver._
 
 @main def run(): Unit = {
   val source = """
+enum Eq(using A: Type)(a: A, b: A) extends Type:
+  case Refl(using A: Type, a: A) extends Eq(a, a)
 """
   val source1 = """
 enum Nat extends Type:
@@ -44,5 +46,5 @@ enum Reduce(t: Trm, t1: Trm) extends Type:
   case reduceApp(T: Typ, t: Trm, u: Trm) extends Reduce(app(fun(T, t), u), ???)
 """
 
-  println(check(source1))
+  println(check(source))
 }
