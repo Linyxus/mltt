@@ -6,16 +6,20 @@ import ast.{TypedExprs => tpd}
 import Symbols._
 import evaluator.{EvalContext, Evaluator, Reducer}
 import utils.trace
+import core.messages.Errors._
 
 class Typer extends ConstraintSolving:
   import Typer._
   import DataInfo._
   import Context._
 
+  def defaultError[T](msg: String, srcPos: SrcPos): TyperResult[T] =
+    Left(OtherTypeError(msg).setPos(srcPos))
+
   def isUniverse(e: tpd.Expr)(using Context): TyperResult[Unit] = normalise(e) match
     case _: tpd.Type => Right(())
     case tpd.Wildcard() => Right(())
-    case _ => Left(s"not supported: isType($e)")
+    case _ => defaultError(s"not supported: isType($e)", null)
 
   def normalise(e: tpd.Expr)(using Context): tpd.Expr =
     // Evaluator.normalise(e)(using ctx.toEvalContext)
@@ -24,7 +28,7 @@ class Typer extends ConstraintSolving:
   def constraint(using Context): EqConstraint = ctx.constraint
   def constraint_=(c: EqConstraint)(using Context): Unit = ctx.constraint = c
 
-  def trackingUVar[T](op: => TyperResult[T])(using Context): TyperResult[T] =
+  def trackingUVar[T](srcPos: SrcPos)(op: => TyperResult[T])(using Context): TyperResult[T] =
     ctx.enterUVarScope
     val result = op
     val newScope = ctx.uvarScope
@@ -32,20 +36,20 @@ class Typer extends ConstraintSolving:
     result.flatMap { res =>
       newScope.checkUninstantiated match
         case Nil => Right(res)
-        case xs => Left(s"uninstantiated unification variables: ${xs.map(_.name)}")
+        case xs => Left(UnsolvedUVar(srcPos, xs))
     }
 
   def typedDataDef(ddef: DataDef)(using Context): TyperResult[TypeConInfo] =
     def checkTypeConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
       case tpd.Type(l) => Right(())
       case tpd.PiType(_, _, resTyp) => checkTypeConSig(resTyp)
-      case tp => Left(s"type constructor must return a type, but found $tp")
+      case tp => defaultError(s"type constructor must return a type, but found $tp", tp.srcPos)
 
     def typedDataCon(tyconSym: TypeConSymbol, tycon: TypeConInfo, cdef: ConsDef)(using Context): TyperResult[TypeConInfo => DataConInfo] =
       def checkDataConSig(sig: tpd.Expr): TyperResult[Unit] = sig match
         case tpd.AppliedTypeCon(sym, _) if sym eq tyconSym => Right(())
         case tpd.PiType(_, _, resTyp) => checkDataConSig(resTyp)
-        case tp => Left(s"data constructor must return ${tycon.name}, but found $tp")
+        case tp => defaultError(s"data constructor must return ${tycon.name}, but found ${tp.show}", tp.srcPos)
       typed(cdef.sig) flatMap { dataconSig =>
         checkDataConSig(dataconSig) map { _ =>
           (tycon: TypeConInfo) =>
@@ -112,7 +116,7 @@ class Typer extends ConstraintSolving:
 
   def typedDefDef(ddef: DefDef)(using Context): TyperResult[ValInfo] =
     ctx.lookupValDef(ddef.name) match
-      case Some(_) => Left(s"already defined: ${ddef.name}")
+      case Some(_) => defaultError(s"already defined: ${ddef.name}", ddef.srcPos)
       case None =>
         typed(ddef.typ) flatMap { sig =>
           ddef.body match
@@ -134,41 +138,48 @@ class Typer extends ConstraintSolving:
               }
         }
 
-  def compareTypes(tp1: tpd.Expr, tp2: tpd.Expr)(using Context): TyperResult[Unit] =
-    (tp1, tp2) match
-      case (tp1, tp2) if tp1 == tp2 => Right(())
-      case (tp1, tp2: tpd.UVarRef) =>
-        if tp2.info.instantiated then compareTypes(tp1, tp2.info.instance)
-        else
-          tp2.info.instantiate(tp1)
-          Right(())
-      case (tp1: tpd.UVarRef, tp2) => compareTypes(tp2, tp1)
-      case (tpd.AppliedTypeCon(tycon1, args1), tpd.AppliedTypeCon(tycon2, args2)) =>
-        if tycon1 eq tycon2 then collectAll(args1 zip args2 map { (a1, a2) => compareTypes(a1, a2) }).map(_ => ())
-        else Left(s"mismatched type constructor: $tycon1 and $tycon2")
-      case (tpd.PiElim(fun1, arg1), tpd.PiElim(fun2, arg2)) =>
-        compareTypes(fun1, fun2) flatMap { _ => compareTypes(arg1, arg2) }
-      case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
-        compareTypes(argTyp1, argTyp2) flatMap { _ =>
-          val sym = ParamSymbol(argName2, argTyp2)
-          val resType1 = substBinder(tp1, tpd.ValRef(sym), resTyp1)
-          val resType2 = substBinder(tp2, tpd.ValRef(sym), resTyp2)
-          compareTypes(resType1, resType2)
-        }
-      case (tp1 @ tpd.PiIntro(argName1, argTyp1), tp2 @ tpd.PiIntro(argName2, argTyp2)) =>
-        compareTypes(argTyp1, argTyp2) flatMap { _ =>
-          val sym = ParamSymbol(argName2, argTyp2)
-          val body1 = substBinder(tp1, tpd.ValRef(sym), tp1.body)
-          val body2 = substBinder(tp2, tpd.ValRef(sym), tp2.body)
-          compareTypes(body1, body2)
-        }
-      case (tp1, tp2) => if tp1 == tp2 then Right(()) else Left(s"Type mismatch: $tp1 vs $tp2")
+  def typeMismatch(e: tpd.Expr, pt: tpd.Expr, tp1: tpd.Expr, tp2: tpd.Expr): TyperResult[Unit] =
+    Left(TypeMismatch(e, pt, tp1, tp2))
 
-  def isMatchingTypes(tp: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] = trace(s"isMatchingTypes($tp, $pt)") {
+  def compareTypes(e: tpd.Expr, pt: tpd.Expr)(using Context): TyperResult[Unit] =
+    def recur(tp1: tpd.Expr, tp2: tpd.Expr): TyperResult[Unit] = trace(s"compareTypes $tp1 >:< $tp2") {
+      def issueError = typeMismatch(e, pt, tp1, tp2)
+      (tp1, tp2) match
+        case (tp1, tp2: tpd.UVarRef) =>
+          if tp2.info.instantiated then recur(tp1, tp2.info.instance)
+          else if tp1 eq tp2 then Right(())
+          else
+            tp2.info.instantiate(tp1)
+            Right(())
+        case (tp1: tpd.UVarRef, tp2) => recur(tp2, tp1)
+        case (tpd.AppliedTypeCon(tycon1, args1), tpd.AppliedTypeCon(tycon2, args2)) =>
+          if tycon1 eq tycon2 then collectAll(args1 zip args2 map { (a1, a2) => recur(a1, a2) }).map(_ => ())
+          else issueError
+        case (tpd.PiElim(fun1, arg1), tpd.PiElim(fun2, arg2)) =>
+          recur(fun1, fun2) flatMap { _ => recur(arg1, arg2) }
+        case (tp1 @ tpd.PiType(argName1, argTyp1, resTyp1), tp2 @ tpd.PiType(argName2, argTyp2, resTyp2)) =>
+          recur(argTyp1, argTyp2) flatMap { _ =>
+            val sym = ParamSymbol(argName2, argTyp2)
+            val resType1 = substBinder(tp1, tpd.ValRef(sym), resTyp1)
+            val resType2 = substBinder(tp2, tpd.ValRef(sym), resTyp2)
+            recur(resType1, resType2)
+          }
+        case (tp1 @ tpd.PiIntro(argName1, argTyp1), tp2 @ tpd.PiIntro(argName2, argTyp2)) =>
+          recur(argTyp1, argTyp2) flatMap { _ =>
+            val sym = ParamSymbol(argName2, argTyp2)
+            val body1 = substBinder(tp1, tpd.ValRef(sym), tp1.body)
+            val body2 = substBinder(tp2, tpd.ValRef(sym), tp2.body)
+            recur(body1, body2)
+          }
+        case (tp1, tp2) => if tp1 == tp2 then Right(()) else issueError
+    }
+    recur(normalise(e.tpe), pt)
+
+  def isMatchingTypes(e: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[Unit] = trace(s"isMatchingTypes(${e.tpe}, $pt)") {
     pt match {
       case null => Right(())
       case pt: tpd.Expr =>
-        compareTypes(normalise(tp), normalise(pt))
+        compareTypes(e, normalise(pt))
     }
   }
 
@@ -176,23 +187,25 @@ class Typer extends ConstraintSolving:
     val showPt = if pt eq null then "<null>" else pt.toString
     // println(s"typing $e, pt = $showPt")
     trace(s"typing $e, pt = $showPt") {
-      typed1(e, pt) flatMap { e1 =>
-        isMatchingTypes(e1.tpe, pt).map(_ => e1)
+      typed1(e, pt).map(_.setPos(e.srcPos)) flatMap { e1 =>
+        isMatchingTypes(e1, pt).map(_ => e1)
       }
     }
 
-  def adaptImplicit(e: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[tpd.Expr] =
-    pt match
-      case null => Right(e)
-      case pt: tpd.Expr => normalise(e.tpe) match
+  def adaptImplicit(expr: tpd.Expr, pt: tpd.Expr | Null)(using Context): TyperResult[tpd.Expr] =
+    def go(e: tpd.Expr, pt: tpd.Expr): TyperResult[tpd.Expr] =
+      normalise(e.tpe) match
         case tp1 @ tpd.PiType(arg1, typ1, resTyp1) if tp1.isImplicitFunction =>
           val tp2 = normalise(pt)
           tp2 match
             case tp2 @ tpd.PiType(_, _, _) if tp2.isImplicitFunction => Right(e)
             case _ =>
-              val arg0 = tpd.UVarRef(UVarInfo(arg1, typ1))
-              typedApplyFunction(e, arg0, imp = true) flatMap { fun0 => adaptImplicit(fun0, tp2) }
+              val arg0 = tpd.UVarRef(UVarInfo(arg1, typ1, CreationSite(expr.srcPos, "implicit argument")))
+              typedApplyFunction(e, arg0, imp = true) flatMap { fun0 => go(fun0, tp2) }
         case _ => Right(e)
+    pt match
+      case null => Right(expr)
+      case pt: tpd.Expr => go(expr, pt)
 
   def lookupConstructor(name: String, pt: tpd.Expr | Null)(using Context): Option[TypeConInfo | DataConInfo] =
     def expectedTypeCon: Option[String] =
@@ -204,7 +217,7 @@ class Typer extends ConstraintSolving:
     def lookupDataCon: Option[TypeConInfo | DataConInfo] = ctx.lookupDataConInfo(name, expectedTypeCon)
     lookupTypeCon orElse lookupDataCon
 
-  def adaptConstructor(name: String, pt: tpd.Expr | Null, errMsg: String)(using Context): TyperResult[tpd.Expr] =
+  def adaptConstructor(srcPos: SrcPos, name: String, pt: tpd.Expr | Null, errMsg: TypeError)(using Context): TyperResult[tpd.Expr] =
     def isAdaptableSig(sig: tpd.Expr): Boolean =
       @annotation.tailrec def recur(sig: tpd.Expr): Boolean = sig match
         case sig @ tpd.PiType(_, _, resTyp) => sig.isImplicitFunction && recur(resTyp)
@@ -214,12 +227,12 @@ class Typer extends ConstraintSolving:
       def recur(e: tpd.Expr): TyperResult[tpd.Expr] = e.tpe match
         case fun @ tpd.PiType(argName, argTyp, resTyp) =>
           assert(fun.isImplicitFunction)
-          val arg0 = tpd.UVarRef(UVarInfo(ctx.freshen(argName), argTyp))
+          val arg0 = tpd.UVarRef(UVarInfo(ctx.freshen(argName), argTyp, CreationSite(srcPos, "implicit argument")))
           typedApplyFunction(e, arg0, imp = true) flatMap { fun0 =>
             recur(fun0)
           }
         case _ => Right(e)
-      val dummy: tpd.Expr = tpd.Wildcard().withType(sig)
+      val dummy: tpd.Expr = tpd.Wildcard().withType(sig).setPos(srcPos)
       recur(dummy) map { adapted =>
         val args = retriveAppliedArguments(adapted)
         (con, normalise(adapted.tpe)) match
@@ -247,14 +260,14 @@ class Typer extends ConstraintSolving:
           res1
         )
       case None =>
-        adaptConstructor(name, pt, errMsg = s"unknown variable $name")
+        adaptConstructor(e.srcPos, name, pt, errMsg = OtherTypeError(s"unknown variable $name").setPos(e.srcPos))
         // Left(s"unknown variable $name")
     }
-    case Apply(expr, args, imp) => typedApply(expr, args, pt, imp)
+    case Apply(expr, args, imp) => typedApply(expr, args, pt, e.srcPos, imp)
     case ApplyTypeCon(name, iargs, args) =>
       ctx.lookupTypeConInfo(name) match
-        case None => Left(s"unknown type constructor $name")
-        case Some(tycon) => typedApplyTypeCon(tycon, iargs, args)
+        case None => defaultError(s"unknown type constructor $name", e.srcPos)
+        case Some(tycon) => typedApplyTypeCon(tycon, iargs, args, e.srcPos)
     case ApplyDataCon(name, iargs, args) =>
       def getExpectedTypeCon: Option[String] =
         pt match
@@ -262,10 +275,10 @@ class Typer extends ConstraintSolving:
           case _ => None
 
       ctx.lookupDataConInfo(name, getExpectedTypeCon) match
-        case None => Left(s"unknown data constructor $name")
-        case Some(con) => typedApplyDataCon(con, iargs, args)
+        case None => defaultError(s"unknown data constructor $name", e.srcPos)
+        case Some(con) => typedApplyDataCon(con, iargs, args, e.srcPos)
     case Pi(arg, typ, resTyp, imp) => typedPi(arg, typ, resTyp, imp)
-    case PiIntro(argName, body) => typedPiIntro(argName, body, pt)
+    case PiIntro(argName, body) => typedPiIntro(argName, body, pt, e.srcPos)
     case e @ Match(scrutinee, cases) => typedMatch(e, pt)
     case e @ Type(l) => typedType(e, pt)
     case Level() => Right(tpd.Level())
@@ -280,7 +293,7 @@ class Typer extends ConstraintSolving:
       }
     case Undefined() =>
       if pt == null then
-        Left(s"cannot type ??? w/o an expected type")
+        defaultError(s"cannot type ??? w/o an expected type", e.srcPos)
       else
         println(s"Goal: ${normalise(pt).show}")
         // println(s"normalising ${pt.show} --> ${normalise(pt).show}")
@@ -292,9 +305,9 @@ class Typer extends ConstraintSolving:
         Right(tpd.Wildcard().withType(pt))
     case e: Block => typedBlock(e, pt)
     case OmittedType =>
-      val tp0 = tpd.UVarRef(UVarInfo(ctx.freshen("resultType"), tpd.Type(tpd.LZero())))
+      val tp0 = tpd.UVarRef(UVarInfo(ctx.freshen("resultType"), tpd.Type(tpd.LZero()), CreationSite(e.srcPos, "result type")))
       Right(tp0)
-    case _ => Left(s"not supported: typed($e)")
+    case _ => assert(false, s"not supported: typed($e)")
 
   def typedType(e: Type, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] =
     typed(e.level, pt = tpd.Level()) map { l => tpd.Type(l) }
@@ -322,12 +335,12 @@ class Typer extends ConstraintSolving:
                 val binder = tpd.PiType(argName, argTyp1, resTyp2).withType(tpd.Type(l))
                 pref.overwriteBinder(binder)
                 Right(if isImp then binder.asImplicit else binder)
-              case _ => Left(s"return type $resTyp1 is not a type")
+              case _ => defaultError(s"return type $resTyp1 is not a type", resTyp.srcPos)
           }
-        case _ => Left(s"cannot abstract over $argTyp1 (${argTyp1.tpe.show})")
+        case _ => defaultError(s"cannot abstract over ${argTyp1.show}, which is not a type (its type is ${argTyp1.tpe.show})", resTyp.srcPos)
     }
 
-  def typedPiIntro(argName: String, body: Expr, pt: tpd.Expr)(using Context): TyperResult[tpd.Expr] =
+  def typedPiIntro(argName: String, body: Expr, pt: tpd.Expr, srcPos: SrcPos)(using Context): TyperResult[tpd.Expr] =
     pt match
       case pt @ tpd.PiType(eargName, eargTyp, eresTyp) =>
         isUniverse(eargTyp.tpe) flatMap { _ =>
@@ -343,7 +356,7 @@ class Typer extends ConstraintSolving:
             binder.withBody(body1).withType(tpe)
           }
         }
-      case _ => Left(s"cannot type function with expected type $pt")
+      case _ => defaultError(s"cannot type function with expected type $pt", srcPos)
 
   def typedMatch(e: Match, pt: tpd.Expr | Null)(using Context): TyperResult[tpd.Expr] =
     typed(e.scrutinee) flatMap { scrutinee =>
@@ -361,10 +374,10 @@ class Typer extends ConstraintSolving:
                             val sym = ParamSymbol(name, argTyp)
                             val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
                             recur(iargs, args, nextTyp, sym :: acc)
-                          else Left(s"too many implicits arguments in pattern $pat")
+                          else defaultError(s"too many implicits arguments in pattern $pat", pat.srcPos)
                         case _ =>
-                          Left(s"too many arguments in pattern $pat")
-                    case e :: iargs => Left(s"ill-formed pattern: $pat")
+                          defaultError(s"too many arguments in pattern $pat", pat.srcPos)
+                    case e :: iargs => defaultError(s"nested pattern is not supported", e.srcPos)
                     case Nil =>
                       args match
                         case Nil => accTyp match
@@ -375,7 +388,7 @@ class Typer extends ConstraintSolving:
                             val sym = ParamSymbol(ctx.freshen(argName), argTyp)
                             val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
                             recur(Nil, Nil, nextTyp, sym :: acc)
-                          case _ => Left(s"incorrect number of arguments in pattern $pat")
+                          case _ => defaultError(s"incorrect number of arguments in pattern $pat", pat.srcPos)
                         case allArgs @ (Var(name) :: args) => accTyp match
                           case binder @ tpd.PiType(argName, argTyp, resTyp) =>
                             if binder.isImplicitFunction then
@@ -386,13 +399,13 @@ class Typer extends ConstraintSolving:
                               val sym = ParamSymbol(name, argTyp)
                               val nextTyp = substBinder(binder, tpd.ValRef(sym), resTyp)
                               recur(Nil, args, nextTyp, sym :: acc)
-                          case other => Left(s"incorrect number of arguments in pattern $pat")
-                        case exp :: args => Left(s"ill-formed pattern: $pat")
+                          case other => defaultError(s"incorrect number of arguments in pattern $pat", pat.srcPos)
+                        case exp :: args => defaultError(s"nested pattern is not supported", exp.srcPos)
                 recur(pat.iargs, pat.args, dcon.sig, Nil)
-              case None => Left(s"unknown data constructor ${pat.name}")
-          def typedCase(cdef: CaseDef)(using Context): TyperResult[tpd.CaseDef] = trackingUVar {
+              case None => defaultError(s"unknown data constructor ${pat.name}", pat.srcPos)
+          def typedCase(cdef: CaseDef)(using Context): TyperResult[tpd.CaseDef] = trackingUVar(cdef.srcPos) {
             typedPattern(cdef.pat) flatMap { case (pat, paramSyms) =>
-              def updateConstraint: TyperResult[Unit] =
+              def updateConstraint: SolverResult[Unit] =
                 addEquality(pat, scrutinee) flatMap { _ =>
                   addEquality(pat.tpe, scrutTyp)
                 }
@@ -413,10 +426,12 @@ class Typer extends ConstraintSolving:
                 val resPat = tpd.Pattern(pat.datacon, paramSyms.map(_.name), argTyps)
                 val res = tpd.CaseDef(resPat, body1)
                 prefs.foreach(_.overwriteBinder(res))
-                Right(res)
+                if cdef.body.isDefined then
+                  defaultError(s"impossible case should have `()` as the body", cdef.body.get.srcPos)
+                else Right(res)
               else
                 cdef.body match
-                  case None => Left(s"${pat.show} is not an impossible pattern")
+                  case None => defaultError(s"this is not an impossible pattern", pat.srcPos)
                   case Some(body) =>
                     ctx.withBindings(paramSyms) {
                       typed(body, pt = pt) map { body =>
@@ -449,9 +464,9 @@ class Typer extends ConstraintSolving:
               res.setCases(cases)
               Right(res.withType(pt))
             else
-              Left(s"missing cases: $missing")
+              defaultError(s"missing cases: $missing", e.scrutinee.srcPos)
           }
-        case other => Left(s"cannot pattern match $scrutinee of type $other")
+        case other => defaultError(s"cannot pattern match $scrutinee of type $other", e.scrutinee.srcPos)
     }
 
   def retriveAppliedArguments(expr: tpd.Expr): List[tpd.Expr] =
@@ -460,8 +475,8 @@ class Typer extends ConstraintSolving:
       case _ => acc
     recur(expr, Nil)
 
-  def typedApplyTypeCon(info: TypeConInfo, iargs: List[Expr], args: List[Expr])(using Context): TyperResult[tpd.Expr] =
-    val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
+  def typedApplyTypeCon(info: TypeConInfo, iargs: List[Expr], args: List[Expr], srcPos: SrcPos)(using Context): TyperResult[tpd.Expr] =
+    val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig).setPos(srcPos)
     val typedImpArgs = typedApplyFunctionParams(dummy, iargs, imp = true)
     val typedAllArgs = typedImpArgs flatMap { fun0 => typedApplyFunctionParams(fun0, args, imp = false) }
     typedAllArgs flatMap { res =>
@@ -469,11 +484,11 @@ class Typer extends ConstraintSolving:
         case resTyp @ tpd.Type(_) =>
           val args = retriveAppliedArguments(res)
           Right(tpd.AppliedTypeCon(info.symbol, args).withType(resTyp))
-        case resTyp => Left(s"type constructor ${info.symbol} is not fully applied ($resTyp)")
+        case resTyp => Left(ConstructorNotFullyApplied(srcPos, info, resTyp))
     }
 
-  def typedApplyDataCon(info: DataConInfo, iargs: List[Expr], args: List[Expr])(using Context): TyperResult[tpd.Expr] =
-    val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig)
+  def typedApplyDataCon(info: DataConInfo, iargs: List[Expr], args: List[Expr], srcPos: SrcPos)(using Context): TyperResult[tpd.Expr] =
+    val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig).setPos(srcPos)
     val typedImpArgs = typedApplyFunctionParams(dummy, iargs, imp = true)
     val typedAllArgs = typedImpArgs flatMap { fun0 => typedApplyFunctionParams(fun0, args, imp = false) }
     typedApplyFunctionParams(dummy, args) flatMap { res =>
@@ -481,16 +496,16 @@ class Typer extends ConstraintSolving:
         case resTyp @ tpd.AppliedTypeCon(_, _) =>
           val args = retriveAppliedArguments(res)
           Right(tpd.AppliedDataCon(info.symbol, args).withType(resTyp))
-        case resTyp => Left(s"data constructor ${info.symbol} is not fully applied ($resTyp)")
+        case resTyp => Left(ConstructorNotFullyApplied(srcPos, info, resTyp))
     }
 
   def typedApplyFunction(fun: tpd.Expr, arg: tpd.Expr | Expr, imp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     normalise(fun.tpe) match
       case funType @ tpd.PiType(argName, typ, resTyp) =>
         if !funType.isImplicitFunction && imp then
-          Left(s"function of ${funType.show} does not take implicit arguments")
+          defaultError(s"function of ${funType.show} does not take implicit arguments", fun.srcPos)
         else if funType.isImplicitFunction && !imp then
-          val info = UVarInfo(ctx.freshen(argName), typ)
+          val info = UVarInfo(ctx.freshen(argName), typ, CreationSite(fun.srcPos, "implicit argument"))
           val arg0 = tpd.UVarRef(info)
           typedApplyFunction(fun, arg0, imp = true) flatMap { fun0 =>
             // println(s"completing implicit: ${fun0.show}")
@@ -504,7 +519,7 @@ class Typer extends ConstraintSolving:
             val tpe = substBinder(funType, arg, resTyp)
             tpd.PiElim(fun, arg).withType(tpe)
           }
-      case _ => Left(s"cannot apply value $fun of type ${fun.tpe}")
+      case _ => defaultError(s"cannot apply value $fun of type ${fun.tpe}", fun.srcPos)
 
   def typedApplyFunctionParams(fun: tpd.Expr, arg: List[Expr], imp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     def recur(xs: List[Expr], acc: TyperResult[tpd.Expr]): TyperResult[tpd.Expr] = xs match
@@ -512,7 +527,7 @@ class Typer extends ConstraintSolving:
       case x :: xs => recur(xs, acc.flatMap(typedApplyFunction(_, x, imp)))
     recur(arg, Right(fun))
 
-  def typedApply(fun: Expr, args: List[Expr], pt: tpd.Expr | Null, isImp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
+  def typedApply(fun: Expr, args: List[Expr], pt: tpd.Expr | Null, srcPos: SrcPos, isImp: Boolean = false)(using Context): TyperResult[tpd.Expr] =
     def expectedTypeCon: Option[String] =
       if pt eq null then None else
         normalise(pt) match
@@ -528,9 +543,9 @@ class Typer extends ConstraintSolving:
       getArgs flatMap { case (conName, iargs, args) =>
         lookupTypeCon(conName) orElse lookupDataCon(conName) map {
           case info: TypeConInfo =>
-            typedApplyTypeCon(info, iargs, args)
+            typedApplyTypeCon(info, iargs, args, srcPos)
           case info: DataConInfo =>
-            typedApplyDataCon(info, iargs, args)
+            typedApplyDataCon(info, iargs, args, srcPos)
         }
       }
     def typeAsFunction =
@@ -561,21 +576,21 @@ class Typer extends ConstraintSolving:
           typed(e, pt)
         case d :: ds =>
           d.body match
-            case None => Left(s"cannot assume definitions in a local block")
+            case None => defaultError(s"cannot assume definitions in a local block", d.srcPos)
             case Some(_) =>
               typedDefDef(d) flatMap { dinfo =>
                 ctx.withValInfo(dinfo, local = true) { recur(ds, dinfo.sym :: acc, e) }
               }
     recur(e.ddefs, Nil, e.expr)
 
-  def typedDefinition(d: Definition)(using Context): TyperResult[Unit] = trackingUVar {
+  def typedDefinition(d: Definition)(using Context): TyperResult[Unit] = trackingUVar(d.srcPos) {
     d match
       case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
       case ddef: DefDef => typedDefDef(ddef) map { info => ctx.addValInfo(info) }
       case p: Commands.Normalise => typed(p.expr) map { te =>
         println(Reducer.reduce(te).show)
       }
-      case _ => Left(s"unsupported: $d")
+      case _ => assert(false, s"unsupported: $d")
   }
 
   def typedProgram(defs: List[Definition])(using Context): TyperResult[Unit] =
@@ -586,7 +601,7 @@ class Typer extends ConstraintSolving:
     recur(defs)
 
 object Typer:
-  type TyperResult[+X] = Either[String, X]
+  type TyperResult[+X] = Either[TypeError, X]
 
   def substBinder[T <: tpd.PiType | tpd.PiIntro](binder: T, to: tpd.Expr, expr: tpd.Expr): tpd.Expr =
     val exprMap = new tpd.ExprMap:
@@ -608,31 +623,33 @@ object Typer:
 
   def substBinder(name: String, to: Expr, expr: Expr): Expr =
     def k(expr: Expr): Expr = substBinder(name, to, expr)
-    expr match
-      case Var(name1) => if name1 == name then to else Var(name1)
-      case Pi(arg, typ, resTyp, imp) => if arg == name then expr else Pi(arg, k(typ), k(resTyp), imp)
-      case PiIntro(arg, body) => if arg == name then expr else PiIntro(arg, k(body))
-      case Apply(func, args, imp) => Apply(k(func), args.map(k), imp)
-      case ApplyTypeCon(name, iargs, args) => ApplyTypeCon(name, iargs.map(k), args.map(k))
-      case ApplyDataCon(name, iargs, args) => ApplyDataCon(name, iargs.map(k), args.map(k))
-      case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, body.map(k)) })
-      case Type(level) => Type(k(level))
-      case Level() => expr
-      case LZero() => expr
-      case LSucc(pred) => LSucc(k(pred))
-      case LLub(l1, l2) => LLub(k(l1), k(l2))
-      case Undefined() => Undefined()
-      case Block(ddefs, e) =>
-        def recur(ddefs: List[DefDef], acc: List[DefDef], e: Expr): Block =
-          ddefs match
-            case Nil => Block(acc.reverse, k(e))
-            case ddef :: ds =>
-              val ddef1 = substBinder(name, to, ddef)
-              if ddef1.name == name then Block(acc.reverse ++ (ddef1 :: ds), e)
-              else recur(ds, ddef1 :: acc, e)
-        recur(ddefs, Nil, e)
-      case Wildcard => Wildcard
-      case OmittedType => OmittedType
+    val res =
+      expr match
+        case Var(name1) => if name1 == name then to else Var(name1)
+        case Pi(arg, typ, resTyp, imp) => if arg == name then expr else Pi(arg, k(typ), k(resTyp), imp)
+        case PiIntro(arg, body) => if arg == name then expr else PiIntro(arg, k(body))
+        case Apply(func, args, imp) => Apply(k(func), args.map(k), imp)
+        case ApplyTypeCon(name, iargs, args) => ApplyTypeCon(name, iargs.map(k), args.map(k))
+        case ApplyDataCon(name, iargs, args) => ApplyDataCon(name, iargs.map(k), args.map(k))
+        case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, body.map(k)) })
+        case Type(level) => Type(k(level))
+        case Level() => expr
+        case LZero() => expr
+        case LSucc(pred) => LSucc(k(pred))
+        case LLub(l1, l2) => LLub(k(l1), k(l2))
+        case Undefined() => Undefined()
+        case Block(ddefs, e) =>
+          def recur(ddefs: List[DefDef], acc: List[DefDef], e: Expr): Block =
+            ddefs match
+              case Nil => Block(acc.reverse, k(e))
+              case ddef :: ds =>
+                val ddef1 = substBinder(name, to, ddef)
+                if ddef1.name == name then Block(acc.reverse ++ (ddef1 :: ds), e)
+                else recur(ds, ddef1 :: acc, e)
+          recur(ddefs, Nil, e)
+        case Wildcard => Wildcard
+        case OmittedType => OmittedType
+    res.setPos(expr.srcPos)
 
   def abstractSymbol(sym: ValSymbol, target: tpd.Expr, e: tpd.Expr): tpd.Expr =
     val treeMap = new tpd.ExprMap:
@@ -643,6 +660,6 @@ object Typer:
       //   super.apply(e)
     treeMap(e)
 
-  def collectAll[X](xs: List[TyperResult[X]]): TyperResult[List[X]] = xs match
+  def collectAll[E, X](xs: List[Either[E, X]]): Either[E, List[X]] = xs match
     case Nil => Right(Nil)
     case x :: xs => x.flatMap(x => collectAll(xs).map(x :: _))

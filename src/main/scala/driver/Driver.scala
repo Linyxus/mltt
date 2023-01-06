@@ -3,22 +3,24 @@ package driver
 import parser.Parser
 import typer.Typer
 import core.Context
+import core.messages._
 
 object Driver:
-  def check(source: String): Option[String] =
+  def check(source: String): List[String] =
+    val ctx = new Context
+    given Context = ctx.setSource(source).setupSrcPosPrinter
     Parser.parseProgram(source) match
-      case Left(err) => Some(err)
+      case Left(err) => err.show :: Nil
       case Right(defs) =>
         val typer = new Typer
-        val ctx = new Context
-        typer.typedProgram(defs)(using ctx) match
-          case Left(err) => Some(err)
-          case Right(typed) => None
+        typer.typedProgram(defs) match
+          case Left(err) => err.show :: Nil
+          case Right(typed) => Nil
 
   def readFile(path: String): String =
     val content = io.Source.fromFile(path).getLines.mkString("\n")
     content
 
-  def checkFile(path: String): Option[String] =
+  def checkFile(path: String): List[String] =
     check(readFile(path))
 

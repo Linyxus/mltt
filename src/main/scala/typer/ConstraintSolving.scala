@@ -3,15 +3,16 @@ package typer
 import core._
 import ast.TypedExprs._
 import Symbols._
-import Typer.TyperResult
+
+type SolverResult[+X] = Either[String, X]
 
 trait ConstraintSolving:
   def constraint(using Context): EqConstraint
   def constraint_=(c: EqConstraint)(using Context): Unit
   def normalise(e: Expr)(using Context): Expr
 
-  def addEquality(e1: Expr, e2: Expr)(using Context): TyperResult[Unit] =
-    def checkParams(p: ParamSymbol, q: ParamSymbol): TyperResult[Unit] =
+  def addEquality(e1: Expr, e2: Expr)(using Context): SolverResult[Unit] =
+    def checkParams(p: ParamSymbol, q: ParamSymbol): SolverResult[Unit] =
       if constraint.isSame(p, q) then Right(())
       else
         constraint = constraint.addParamEq(p, q)
@@ -27,14 +28,14 @@ trait ConstraintSolving:
           case _ =>
             Right(())
 
-    def checkInstance(p: ParamSymbol, e: Expr): TyperResult[Unit] =
+    def checkInstance(p: ParamSymbol, e: Expr): SolverResult[Unit] =
       constraint.instanceOf(p) match
         case None =>
           constraint = constraint.instantiate(p, e)
           Right(())
         case Some(e1) => recur(e1, e)
 
-    def recur(e1: Expr, e2: Expr): TyperResult[Unit] =
+    def recur(e1: Expr, e2: Expr): SolverResult[Unit] =
       (e1, e2) match
         case (ValRef(p1: ParamSymbol), ValRef(p2: ParamSymbol)) => checkParams(p1, p2)
         case (ValRef(p1: ParamSymbol), e2) => checkInstance(p1, e2)

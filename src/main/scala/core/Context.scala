@@ -7,6 +7,7 @@ import core._
 import core.Symbols._
 import evaluator.{EvalContext, Evaluator, Value}
 import Value._
+import utils.SrcPosPrinter
 
 class Context:
 
@@ -17,6 +18,8 @@ class Context:
   private var localSyms: Set[ValDefSymbol] = Set.empty
   private var currentUVarScope: UVarScope = new UVarScope(null)
   private var freshCounter: Int = 0
+  private var mySource: String | Null = null
+  private var mySrcPosPrinter: SrcPosPrinter | Null = null
 
   def fresh: Context =
     val freshCtx = new Context
@@ -27,7 +30,22 @@ class Context:
     freshCtx.localSyms = localSyms
     freshCtx.currentUVarScope = currentUVarScope
     freshCtx.freshCounter = freshCounter
+    freshCtx.mySource = mySource
+    freshCtx.mySrcPosPrinter = mySrcPosPrinter
     freshCtx
+
+  def setSource(source: String): this.type =
+    mySource = source
+    this
+
+  def setupSrcPosPrinter: this.type =
+    mySrcPosPrinter = new SrcPosPrinter:
+      val source = mySource
+    this
+
+  def showSrcPos(srcPos: SrcPos, hint: Option[String]): String =
+    assert(mySrcPosPrinter ne null)
+    mySrcPosPrinter.nn.showSrcPos(srcPos, hint)
 
   def freshen(x: String): String =
     freshCounter += 1

@@ -1,4 +1,4 @@
 package ast
 
-trait Definition
+trait Definition extends WithPos
 

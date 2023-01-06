@@ -7,7 +7,7 @@ import core.UVarInfo
 object TypedExprs {
   private var nextExprId: Int = 0
 
-  sealed trait Expr {
+  sealed trait Expr extends WithPos {
     protected val myId: Int =
       nextExprId += 1
       // assert(nextExprId != 7417, "GOTCHA")
@@ -461,6 +461,8 @@ object TypedExprs {
         case e @ Wildcard() => mapWildcard(e)
       if isDebugging then
         println(s"ExprMap: map $t --> $result")
+      if t.hasPos then
+        result.setPos(t.srcPos)
       result
 }
 

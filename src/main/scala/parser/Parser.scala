@@ -1,5 +1,7 @@
 package parser
 
+import core.messages._
+import Errors._
 import ast._
 import ast.{Commands => cmd}
 import scala.annotation.tailrec
@@ -8,7 +10,7 @@ class Parser(source: String):
   import Parser._
 
   private var tokens: LazyList[Token] = Tokenizer.getTokensLazy(source)
-  tokens.toList
+  private var consumedTokens: List[Token] = Nil
   private def current = tokens.head
   private var indentLevel: Int = 0
 
@@ -20,13 +22,24 @@ class Parser(source: String):
       indentLevel += 1
     else if peekType == Outdent() then
       indentLevel -= 1
+    consumedTokens = current :: consumedTokens
     tokens = tokens.tail
 
+  def withPosition[T <: WithPos](op: => ParseResult[T]): ParseResult[T] =
+    val startPos = current.srcPos
+    op.map { result =>
+      val lastPos = consumedTokens.head.srcPos
+      result.setPos(startPos to lastPos)
+    }
+
+  def emitError[X](msg: String): ParseResult[X] =
+    Left(ParseError(msg).setPos(current.srcPos))
+
   def lookAheadWith(tp: TokenType): ParseResult[Token] =
-    if eof then Left(s"expecting $tp but found end-of-file")
+    if eof then emitError(s"expecting $tp but found end-of-file")
     else
       if tokens.tail.head.tp == tp then Right(tokens.tail.head)
-      else Left(s"expecting $tp but found ${tokens.tail.head.tp}")
+      else emitError(s"expecting $tp but found ${tokens.tail.head.tp}")
 
   def eof: Boolean = peekType == EOF()
 
@@ -35,7 +48,7 @@ class Parser(source: String):
       Right(current)
     else
       // assert(tpe != RightParen())
-      Left(s"expecting $tpe, but found $peekType (${tokens.toList})")
+      emitError(s"expecting $tpe, but found $peekType")
 
   def matchAhead(tpe: TokenType): ParseResult[Token] =
     // tpe match
@@ -54,20 +67,21 @@ class Parser(source: String):
   def parseIdentifier: ParseResult[Token] =
     peekType match
       case Ident(name) => Right(current)
-      case _ => Left(s"expecting identifier, but see $peekType")
+      case _ => emitError(s"expecting identifier, but see $peekType")
 
   def parsePiIntro(argName: String): ParseResult[Expr] =
     matchAhead(DoubleArrow()) flatMap { _ =>
       parseExpr map { body => PiIntro(argName, body) }
     }
 
-  def parsePattern: ParseResult[ApplyDataCon] =
+  def parsePattern: ParseResult[ApplyDataCon] = withPosition {
     parseIdentifier flatMap { con =>
       step()
       parseParamListWithImplicitsOptional map { (iargs, args) =>
         ApplyDataCon(con.content, iargs.getOrElse(Nil), args.getOrElse(Nil))
       }
     }
+  }
 
   def parseUnit: ParseResult[Unit] =
     if peekType == LeftParen() then
@@ -76,9 +90,9 @@ class Parser(source: String):
         step()
         ()
       }
-    else Left(s"expecting left paren, but found $peekType")
+    else emitError(s"expecting left paren, but found $peekType")
 
-  def parseCaseDef: ParseResult[CaseDef] =
+  def parseCaseDef: ParseResult[CaseDef] = withPosition {
     matchAhead(Case()) flatMap { _ =>
       parsePattern flatMap { pat =>
         matchAhead(DoubleArrow()) flatMap { _ =>
@@ -89,6 +103,7 @@ class Parser(source: String):
         }
       }
     }
+  }
 
   def parseCaseDefs: List[CaseDef] =
     @annotation.tailrec def recur(acc: List[CaseDef]): List[CaseDef] =
@@ -181,36 +196,41 @@ class Parser(source: String):
         }
     }
 
-  def parseExpr: ParseResult[Expr] = parseExprAtom flatMap { e =>
-    @annotation.tailrec def recur(acc: Expr): ParseResult[Expr] =
-      if peekType == LeftParen() then
-        parseParamListWithImplicits match
-          case err @ Left(_) => err.asInstanceOf[ParseResult[Expr]]
-          case Right((ips, ps)) => (ips, ps) match
-            case (Some(ips), Some(ps)) =>
-              recur(Apply(Apply(acc, ips, imp = true), ps, imp = false))
-            case (Some(ips), None) =>
-              recur(Apply(acc, ips, imp = true))
-            case (None, Some(ps)) =>
-              recur(Apply(acc, ps, imp = false))
-            case (None, None) => assert(false)
-      else if peekType == parser.Match() then
-        step()
-        Right(Match(acc, parseCaseDefs))
-      else Right(acc)
-    val result = recur(e)
-    result
-  }
+  def parseExpr: ParseResult[Expr] =
+    withPosition(parseExprAtom) flatMap { e =>
+      def nowSpan: SrcPos = e.srcPos to consumedTokens.head.srcPos
+      def recur(acc: Expr): ParseResult[Expr] =
+        if !acc.hasPos then acc.setPos(nowSpan)
+        if peekType == LeftParen() then
+          parseParamListWithImplicits match
+            case err @ Left(_) => err.asInstanceOf[ParseResult[Expr]]
+            case Right((ips, ps)) => (ips, ps) match
+              case (Some(ips), Some(ps)) =>
+                recur(Apply(Apply(acc, ips, imp = true).setPos(nowSpan), ps, imp = false))
+              case (Some(ips), None) =>
+                recur(Apply(acc, ips, imp = true))
+              case (None, Some(ps)) =>
+                recur(Apply(acc, ps, imp = false))
+              case (None, None) => assert(false)
+        else if peekType == parser.Match() then
+          step()
+          Right(Match(acc, parseCaseDefs).setPos(nowSpan))
+        else Right(acc)
+
+      val result = recur(e)
+      result
+    }
 
   def parseType: ParseResult[Expr] =
+    val pos0 = current.srcPos
     step()
     if peekType != LeftParen() then
-      Right(Type(LZero()))
+      Right(Type(LZero().setPos(pos0)).setPos(pos0))
     else
       matchAhead(LeftParen()) flatMap { _ =>
         parseExpr flatMap { level =>
-          matchAhead(RightParen()) map { _ =>
-            Type(level)
+          matchAhead(RightParen()) map { tk =>
+            Type(level).setPos(pos0 to tk.srcPos)
           }
         }
       }
@@ -228,7 +248,7 @@ class Parser(source: String):
     step()
     parseParamList flatMap {
       case p1 :: p2 :: Nil => Right(LLub(p1, p2))
-      case _ => Left(s"`lub` has to be applied to two arguments")
+      case _ => emitError(s"`lub` has to be applied to two arguments")
     }
 
   def parseExprAtom: ParseResult[Expr] = peekType match
@@ -247,8 +267,8 @@ class Parser(source: String):
     case Ident(name) => varOrPiIntro
     case LeftParen() => parsePi
     case LeftBrace() => parseBlock
-    case ErrorToken(msg) => Left(s"tokeniaztion error: $msg")
-    case _ => Left(s"unexpected token type $peekType, (${tokens.toList})")
+    case ErrorToken(msg) => emitError(msg)
+    case _ => emitError(s"expecting the start of an expression, but see $current")
 
   def parseMany[T](lead: TokenType, op: () => ParseResult[T]): ParseResult[List[T]] =
     @annotation.tailrec def recur(acc: List[T]): ParseResult[List[T]] =
@@ -301,21 +321,22 @@ class Parser(source: String):
         }
     }
 
-  def makePiType(args: List[(String, Expr)], resTyp: Expr, isImp: Boolean = false): Expr =
+  def makePiType(args: List[(String, Expr)], resTyp: Expr, srcPos: SrcPos, isImp: Boolean = false): Expr =
     @annotation.tailrec def recur(xs: List[(String, Expr)], acc: Expr): Expr =
       xs match
         case Nil => acc
-        case (argName, argTyp) :: xs => recur(xs, Pi(argName, argTyp, acc, isImp))
+        case (argName, argTyp) :: xs => recur(xs, Pi(argName, argTyp, acc, isImp).setPos(srcPos))
     recur(args.reverse, resTyp)
 
   def parseDataCon: ParseResult[ConsDef] =
-    matchAhead(Case()) flatMap { _ =>
+    matchAhead(Case()) flatMap { tk0 =>
       parseIdentifier flatMap { case Token(_, name) =>
         step()
         parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr map { resTyp =>
-              val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)
+              val srcPos = tk0.srcPos to resTyp.srcPos
+              val sig = makePiType(iformals, makePiType(formals, resTyp, srcPos), srcPos, isImp = true)
               ConsDef(name, sig)
             }
           }
@@ -334,14 +355,15 @@ class Parser(source: String):
     else Right((Nil, Nil))
 
   def parseDataDef: ParseResult[DataDef] =
-    matchAhead(Enum()) flatMap { _ =>
+    matchAhead(Enum()) flatMap { tk0 =>
       parseIdentifier flatMap { case Token(_, name) =>
         step()
         parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           matchAhead(Extends()) flatMap { _ =>
             parseExpr flatMap { resTyp =>
-              val sig0 = makePiType(formals, resTyp)
-              val sig = makePiType(iformals, sig0, isImp = true)
+              val srcPos = tk0.srcPos to resTyp.srcPos
+              val sig0 = makePiType(formals, resTyp, srcPos)
+              val sig = makePiType(iformals, sig0, srcPos, isImp = true)
               matchAhead(Colon()) flatMap { _ =>
                 parseMany(Case(), () => parseDataCon) map { conss =>
                   DataDef(name, sig, conss)
@@ -353,11 +375,11 @@ class Parser(source: String):
       }
     }
 
-  def makePiIntro(args: List[String], body: Expr): Expr =
+  def makePiIntro(args: List[String], body: Expr, srcPos: SrcPos): Expr =
     @annotation.tailrec def recur(xs: List[String], acc: Expr): Expr =
       xs match
         case Nil => acc
-        case x :: xs => recur(xs, PiIntro(x, acc))
+        case x :: xs => recur(xs, PiIntro(x, acc).setPos(srcPos))
     recur(args.reverse, body)
 
   def parseBlock: ParseResult[Expr] =
@@ -376,8 +398,8 @@ class Parser(source: String):
     }
 
   def parseDefDef: ParseResult[DefDef] =
-    matchAhead(Def()) flatMap { _ =>
-      parseIdentifier flatMap { case Token(_, defname) =>
+    matchAhead(Def()) flatMap { tk0 =>
+      parseIdentifier flatMap { case tk @ Token(_, defname) =>
         step()
         parseFormalListWithImplicitsOptional flatMap { (iformals, formals) =>
           def parseResultType: ParseResult[Option[Expr]] =
@@ -385,13 +407,14 @@ class Parser(source: String):
               matchAhead(Colon()).flatMap(_ => parseExpr.map(Some(_)))
             else Right(None)
           parseResultType flatMap { resTypOpt =>
-            val resTyp = resTypOpt.getOrElse(OmittedType)
-            val sig = makePiType(iformals, makePiType(formals, resTyp), isImp = true)
+            val resTyp = resTypOpt.getOrElse(OmittedType.setPos(tk.srcPos))
+            val srcPos = tk0.srcPos to resTyp.srcPos
+            val sig = makePiType(iformals, makePiType(formals, resTyp, srcPos), srcPos, isImp = true)
             if peekType == Equal() then
               matchAhead(Equal()) flatMap { _ =>
                 parseExpr map { body =>
                   val args = iformals.map(_._1) ++ formals.map(_._1)
-                  val term = makePiIntro(args, body)
+                  val term = makePiIntro(args, body, tk0.srcPos to body.srcPos)
                   DefDef(defname, sig, Some(term))
                 }
               }
@@ -410,12 +433,13 @@ class Parser(source: String):
       }
     }
 
-  def parseDef: ParseResult[Definition] =
+  def parseDef: ParseResult[Definition] = withPosition {
     peekType match
       case Println() => parsePrintln
       case Def() => parseDefDef
       case Enum() => parseDataDef
-      case _ => Left(s"expecting start of definition, but found $peekType")
+      case _ => emitError(s"expecting start of definition, but found $current")
+  }
 
   def parseDefs: ParseResult[List[Definition]] =
     @annotation.tailrec def recur(acc: List[Definition]): ParseResult[List[Definition]] =
@@ -427,7 +451,7 @@ class Parser(source: String):
     recur(Nil)
 
 object Parser:
-  type ParseResult[+X] = Either[String, X]
+  type ParseResult[+X] = Either[ParseError, X]
 
   def parseExpr(source: String): ParseResult[Expr] =
     val parser = new Parser(source)

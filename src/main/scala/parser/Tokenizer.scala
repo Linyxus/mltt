@@ -10,7 +10,7 @@ class Tokenizer(source: String):
   private var nextTokens: Queue[Token] = Queue.empty
   private var indentLevels: List[Int] = 0 :: Nil
 
-  def makeToken(tp: TokenType): Token = Token(tp, source.substring(start, current))
+  def makeToken(tp: TokenType): Token = Token(tp, source.substring(start, current)).setPos(ast.SrcPos(start, current))
 
   def emitToken(tp: TokenType): Unit = nextTokens.enqueue(makeToken(tp))
 
@@ -118,7 +118,9 @@ class Tokenizer(source: String):
 
   def nextToken: Token =
     if nextTokens.isEmpty then scanNext()
-    nextTokens.dequeue()
+    val res = nextTokens.dequeue()
+    assert(res.hasPos)
+    res
 
 object Tokenizer:
   def getTokens(source: String): List[Token] =

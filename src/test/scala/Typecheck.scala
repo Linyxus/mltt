@@ -8,6 +8,6 @@ class TypecheckSuite extends munit.FunSuite {
 
   for path <- Files.list(dir).iterator().asScala do
     test(path.toString) {
-      assertEquals(checkFile(path.toString), None)
+      assertEquals(checkFile(path.toString), Nil)
     }
 }

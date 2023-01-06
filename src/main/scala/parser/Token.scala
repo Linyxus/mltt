@@ -44,7 +44,7 @@ case class Outdent() extends TokenType
 case class EOF() extends TokenType
 case class ErrorToken(msg: String) extends TokenType
 
-case class Token(tp: TokenType, content: String) {
+case class Token(tp: TokenType, content: String) extends ast.WithPos {
   override def toString(): String = tp match
     case EOF() => "<eof>"
     case ErrorToken(msg) => s"<error: $msg>"

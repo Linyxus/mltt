@@ -1,9 +1,12 @@
 package core
 
 import ast.TypedExprs._
+import ast.SrcPos
 import Context.ctx
 
-class UVarInfo(using Context)(val name: String, val typ: Expr) {
+case class CreationSite(site: SrcPos, reason: String)
+
+class UVarInfo(using Context)(val name: String, val typ: Expr, val creator: CreationSite) {
   ctx.trackUVarInfo(this)
   private var myInstance: Expr | Null = null
   def instantiated: Boolean = myInstance ne null

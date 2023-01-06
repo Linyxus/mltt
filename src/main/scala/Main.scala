@@ -3,24 +3,6 @@ import driver.Driver._
 @main def run(): Unit = {
   val source = """
 enum Nat extends Type:
-  case Zero extends Nat
-  case Succ(n: Nat) extends Nat
-
-enum Eq(using A: Type)(a: A, b: A) extends Type:
-  case refl(using A: Type, a: A) extends Eq(a, a)
-
-def symm(using A: Type, a: A, b: A)(eq: Eq(a, b)): Eq(b, a) = eq match
-  case refl => refl
-
-def trans(using A: Type, a: A, b: A, c: A)(eq1: Eq(a, b), eq2: Eq(b, c)): Eq(a, c) = eq1 match
-  case refl => eq2 match
-    case refl => refl
-
-def cong(using A: Type, B: Type, a: A, b: A)(eq: Eq(a, b), f: (x: A) -> B): Eq(f(a), f(b)) = eq match
-  case refl => refl
-"""
-  val source1 = """
-enum Nat extends Type:
   case Zero() extends Nat()
   case Succ(n: Nat()) extends Nat()
 def Nat: Type = Nat()
@@ -60,5 +42,39 @@ enum Reduce(t: Trm, t1: Trm) extends Type:
   case reduceApp(T: Typ, t: Trm, u: Trm) extends Reduce(app(fun(T, t), u), ???)
 """
 
-  println(check(source))
+  val source1 = """
+enum Eq(using A: Type)(a: A, b: A) extends Type:
+  case refl(using A: Type, a: A) extends Eq(a, a)
+
+enum Nat extends Type:
+  case zero extends Nat
+  case suc(n: Nat) extends Nat
+
+def test0: Type = Type
+"""
+  check(source1).foreach(println)
+  // ctxExperiement()
 }
+
+// def ctxExperiement(): Unit =
+//   class Ctx(val state: Int) {
+//     def detach: Ctx = Ctx(state + 1)
+//   }
+
+//   def ctx(using Ctx): Ctx = summon[Ctx]
+//   def useCtx(using Ctx): Unit = {
+//     println(s"state of ctx im using: ${ctx.state}")
+//   }
+//   class TypeMap(ictx: Ctx):
+//     private var curCtx = ictx
+//     protected given mapCtx[DummySoItsADef]: Ctx = curCtx
+
+//     def apply(): Unit = useCtx
+//     def detach: TypeMap =
+//       curCtx = curCtx.detach
+//       this
+//   val ctx0 = Ctx(0)
+//   val tm = TypeMap(ctx0)
+//   tm()
+//   val tm1 = tm.detach
+//   tm1()

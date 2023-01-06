@@ -1,6 +1,6 @@
 package ast
 
-sealed trait Expr {
+sealed trait Expr extends WithPos {
   override def toString(): String = this match
     case Var(name) => name
     case Pi(arg, typ, resTyp, imp) =>
@@ -34,7 +34,7 @@ case class ApplyTypeCon(name: String, iargs: List[Expr], args: List[Expr]) exten
 
 case class ApplyDataCon(name: String, iargs: List[Expr], args: List[Expr]) extends Expr
 
-case class CaseDef(pat: ApplyDataCon, body: Option[Expr])
+case class CaseDef(pat: ApplyDataCon, body: Option[Expr]) extends WithPos
 
 case class Match(scrutinee: Expr, cases: List[CaseDef]) extends Expr
 
