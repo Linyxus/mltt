@@ -254,7 +254,7 @@ class Typer extends ConstraintSolving:
   def typed1(e: Expr, pt: tpd.Expr | Null = null)(using Context): TyperResult[tpd.Expr] = e match
     case Var(name) => ctx.lookupVal(name) match {
       case Some(sym) =>
-        val res = tpd.ValRef(sym)
+        val res = tpd.ValRef(sym).setPos(e.srcPos)
         adaptImplicit(res, pt).map(res1 =>
           // println(s"adapting $res (${res.tpe}), pt = $pt ===> $res1")
           res1
@@ -517,7 +517,7 @@ class Typer extends ConstraintSolving:
             case arg: Expr => typed(arg, typ)
           typedArg map { arg =>
             val tpe = substBinder(funType, arg, resTyp)
-            tpd.PiElim(fun, arg).withType(tpe)
+            tpd.PiElim(fun, arg).withType(tpe).setPos(fun.srcPos to arg.srcPos)
           }
       case _ => defaultError(s"cannot apply value $fun of type ${fun.tpe}", fun.srcPos)
 
@@ -571,7 +571,7 @@ class Typer extends ConstraintSolving:
                 pref.overwriteBinder(binder)
                 tpref.overwriteBinder(tpe)
                 val arg = sym.dealias.expr
-                val app = tpd.PiElim(binder, arg.get).withType(substBinder(tpe, arg.get, tpe.resTyp))
+                val app = tpd.PiElim(binder, arg.get).withType(substBinder(tpe, arg.get, tpe.resTyp)).setPos(e.srcPos)
                 build(app, acc)
           typed(e, pt)
         case d :: ds =>
@@ -631,7 +631,7 @@ object Typer:
         case Apply(func, args, imp) => Apply(k(func), args.map(k), imp)
         case ApplyTypeCon(name, iargs, args) => ApplyTypeCon(name, iargs.map(k), args.map(k))
         case ApplyDataCon(name, iargs, args) => ApplyDataCon(name, iargs.map(k), args.map(k))
-        case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, body.map(k)) })
+        case Match(scrutinee, cases) => Match(k(scrutinee), cases.map { case cdef @ CaseDef(pat, body) => CaseDef(k(pat).asInstanceOf, body.map(k)).setPos(cdef.srcPos) })
         case Type(level) => Type(k(level))
         case Level() => expr
         case LZero() => expr
