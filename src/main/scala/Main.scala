@@ -49,32 +49,6 @@ enum Eq(using A: Type)(a: A, b: A) extends Type:
 enum Nat extends Type:
   case zero extends Nat
   case suc(n: Nat) extends Nat
-
-def test0: Type = Type
 """
-  check(source1).foreach(println)
-  // ctxExperiement()
+  runTypecheck(source1)
 }
-
-// def ctxExperiement(): Unit =
-//   class Ctx(val state: Int) {
-//     def detach: Ctx = Ctx(state + 1)
-//   }
-
-//   def ctx(using Ctx): Ctx = summon[Ctx]
-//   def useCtx(using Ctx): Unit = {
-//     println(s"state of ctx im using: ${ctx.state}")
-//   }
-//   class TypeMap(ictx: Ctx):
-//     private var curCtx = ictx
-//     protected given mapCtx[DummySoItsADef]: Ctx = curCtx
-
-//     def apply(): Unit = useCtx
-//     def detach: TypeMap =
-//       curCtx = curCtx.detach
-//       this
-//   val ctx0 = Ctx(0)
-//   val tm = TypeMap(ctx0)
-//   tm()
-//   val tm1 = tm.detach
-//   tm1()

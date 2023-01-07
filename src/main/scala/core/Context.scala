@@ -34,6 +34,8 @@ class Context:
     freshCtx.mySrcPosPrinter = mySrcPosPrinter
     freshCtx
 
+  def currentSource: String = mySource
+
   def setSource(source: String): this.type =
     mySource = source
     this
