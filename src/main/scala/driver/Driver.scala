@@ -10,12 +10,12 @@ object Driver:
   def typecheck(using Context): List[Message] =
     val source = ctx.currentSource
     Parser.parseProgram(source) match
-      case Left(err) => err :: Nil
+      case Left(err) => err :: ctx.messages
       case Right(defs) =>
         val typer = new Typer
         typer.typedProgram(defs) match
-          case Left(err) => err :: Nil
-          case Right(typed) => Nil
+          case Left(err) => err :: ctx.messages
+          case Right(typed) => ctx.messages
 
   def readFile(path: String): String =
     val content = io.Source.fromFile(path).getLines.mkString("\n")

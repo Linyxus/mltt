@@ -7,6 +7,7 @@ import Symbols._
 import evaluator.{EvalContext, Evaluator, Reducer}
 import utils.trace
 import core.messages.Errors._
+import core.messages.Message.HoleInfo
 
 class Typer extends ConstraintSolving:
   import Typer._
@@ -295,13 +296,14 @@ class Typer extends ConstraintSolving:
       if pt == null then
         defaultError(s"cannot type ??? w/o an expected type", e.srcPos)
       else
-        println(s"Goal: ${normalise(pt).show}")
-        // println(s"normalising ${pt.show} --> ${normalise(pt).show}")
-        // println(s"constraint = ${ctx.constraint.show}")
-        println(s"=====================")
-        println(ctx.description(e => normalise(e).show))
-        println(s"---------------------")
-        println(ctx.constraint.show ++ "\n")
+        // println(s"Goal: ${normalise(pt).show}")
+        // // println(s"normalising ${pt.show} --> ${normalise(pt).show}")
+        // // println(s"constraint = ${ctx.constraint.show}")
+        // println(s"=====================")
+        // println(ctx.description(e => normalise(e).show))
+        // println(s"---------------------")
+        // println(ctx.constraint.show ++ "\n")
+        ctx.report(HoleInfo(ctx, normalise(pt)))
         Right(tpd.Wildcard().withType(pt))
     case e: Block => typedBlock(e, pt)
     case OmittedType =>

@@ -5,6 +5,7 @@ import DataInfo._
 import ast.{TypedExprs => tpd, _}
 import core._
 import core.Symbols._
+import core.messages._
 import evaluator.{EvalContext, Evaluator, Value}
 import Value._
 import utils.SrcPosPrinter
@@ -20,6 +21,7 @@ class Context:
   private var freshCounter: Int = 0
   private var mySource: String | Null = null
   private var mySrcPosPrinter: SrcPosPrinter | Null = null
+  private var messageLogger = MessageLogger()
 
   def fresh: Context =
     val freshCtx = new Context
@@ -32,7 +34,12 @@ class Context:
     freshCtx.freshCounter = freshCounter
     freshCtx.mySource = mySource
     freshCtx.mySrcPosPrinter = mySrcPosPrinter
+    freshCtx.messageLogger = messageLogger
     freshCtx
+
+  def report(msg: Message): Unit = messageLogger.log(msg)
+
+  def messages: List[Message] = messageLogger.messages.reverse
 
   def currentSource: String = mySource
 

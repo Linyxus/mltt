@@ -43,12 +43,6 @@ enum Reduce(t: Trm, t1: Trm) extends Type:
 """
 
   val source1 = """
-enum Eq(using A: Type)(a: A, b: A) extends Type:
-  case refl(using A: Type, a: A) extends Eq(a, a)
-
-enum Nat extends Type:
-  case zero extends Nat
-  case suc(n: Nat) extends Nat
 """
   runTypecheck(source1)
 }
