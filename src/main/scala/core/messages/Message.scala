@@ -1,6 +1,7 @@
 package core.messages
 
 import core.Context
+import evaluator.Reducer
 import Context.ctx
 import ast.{TypedExprs => tpd}
 
@@ -30,7 +31,7 @@ object Message:
         sb ++= s"\n"
         sb ++= s"Variables\n"
         sb ++= s"---------\n"
-        sb ++= context.description((e: tpd.Expr) => e.show)
+        sb ++= context.description((e: tpd.Expr) => Reducer.reduce(e)(using context).show)
         sb ++= s"\n"
         sb ++= s"Equalities\n"
         sb ++= s"----------\n"

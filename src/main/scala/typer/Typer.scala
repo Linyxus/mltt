@@ -143,7 +143,7 @@ class Typer extends ConstraintSolving:
     Left(TypeMismatch(e, pt, tp1, tp2))
 
   def compareTypes(e: tpd.Expr, pt: tpd.Expr)(using Context): TyperResult[Unit] =
-    def recur(tp1: tpd.Expr, tp2: tpd.Expr): TyperResult[Unit] = trace(s"compareTypes $tp1 >:< $tp2") {
+    def recur(tp1: tpd.Expr, tp2: tpd.Expr): TyperResult[Unit] = trace(s"compareTypes ${tp1.show} >:< ${tp2.show}") {
       def issueError = typeMismatch(e, pt, tp1, tp2)
       (tp1, tp2) match
         case (tp1, tp2: tpd.UVarRef) =>
@@ -155,6 +155,9 @@ class Typer extends ConstraintSolving:
         case (tp1: tpd.UVarRef, tp2) => recur(tp2, tp1)
         case (tpd.AppliedTypeCon(tycon1, args1), tpd.AppliedTypeCon(tycon2, args2)) =>
           if tycon1 eq tycon2 then collectAll(args1 zip args2 map { (a1, a2) => recur(a1, a2) }).map(_ => ())
+          else issueError
+        case (tpd.AppliedDataCon(dcon1, args1), tpd.AppliedDataCon(dcon2, args2)) =>
+          if dcon1 eq dcon2 then collectAll(args1 zip args2 map { (a1, a2) => recur(a1, a2) }).map(_ => ())
           else issueError
         case (tpd.PiElim(fun1, arg1), tpd.PiElim(fun2, arg2)) =>
           recur(fun1, fun2) flatMap { _ => recur(arg1, arg2) }
@@ -493,7 +496,7 @@ class Typer extends ConstraintSolving:
     val dummy: tpd.Expr = tpd.Wildcard().withType(info.sig).setPos(srcPos)
     val typedImpArgs = typedApplyFunctionParams(dummy, iargs, imp = true)
     val typedAllArgs = typedImpArgs flatMap { fun0 => typedApplyFunctionParams(fun0, args, imp = false) }
-    typedApplyFunctionParams(dummy, args) flatMap { res =>
+    typedAllArgs flatMap { res =>
       normalise(res.tpe) match
         case resTyp @ tpd.AppliedTypeCon(_, _) =>
           val args = retriveAppliedArguments(res)
@@ -508,7 +511,7 @@ class Typer extends ConstraintSolving:
           defaultError(s"function of ${funType.show} does not take implicit arguments", fun.srcPos)
         else if funType.isImplicitFunction && !imp then
           val info = UVarInfo(ctx.freshen(argName), typ, CreationSite(fun.srcPos, "implicit argument"))
-          val arg0 = tpd.UVarRef(info)
+          val arg0 = tpd.UVarRef(info).setPos(fun.srcPos)
           typedApplyFunction(fun, arg0, imp = true) flatMap { fun0 =>
             // println(s"completing implicit: ${fun0.show}")
             typedApplyFunction(fun0, arg)
@@ -543,7 +546,7 @@ class Typer extends ConstraintSolving:
         case Var(conName) => Some((conName, Nil, args))
         case _ => None
       getArgs flatMap { case (conName, iargs, args) =>
-        lookupTypeCon(conName) orElse lookupDataCon(conName) map {
+        (lookupTypeCon(conName) orElse lookupDataCon(conName)) map {
           case info: TypeConInfo =>
             typedApplyTypeCon(info, iargs, args, srcPos)
           case info: DataConInfo =>

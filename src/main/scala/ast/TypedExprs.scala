@@ -461,7 +461,7 @@ object TypedExprs {
         case e @ Wildcard() => mapWildcard(e)
       if isDebugging then
         println(s"ExprMap: map $t --> $result")
-      if t.hasPos then
+      if t.hasPos && !result.hasPos then
         result.setPos(t.srcPos)
       result
 }
