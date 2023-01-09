@@ -43,6 +43,69 @@ enum Reduce(t: Trm, t1: Trm) extends Type:
 """
 
   val source1 = """
+enum Nat extends Type:
+  case zero extends Nat
+  case suc(n: Nat) extends Nat
+
+enum Void extends Type:
+
+enum Typ extends Type:
+  case lam(arg: Typ, res: Typ) extends Typ
+  case nat extends Typ
+
+enum Ctx extends Type:
+  case emptyCtx extends Ctx
+  case consCtx(ctx0: Ctx, typ: Typ) extends Ctx
+
+enum InEnv(ctx: Ctx, typ: Typ) extends Type:
+  case here(using ctx: Ctx, typ: Typ) extends InEnv(consCtx(ctx, typ), typ)
+  case there(using ctx: Ctx, A: Typ, B: Typ)(h0: InEnv(ctx, A)) extends InEnv(consCtx(ctx, B), A)
+
+enum Trm(ctx: Ctx, typ: Typ) extends Type:
+  case var(using ctx: Ctx, A: Typ)(inenv: InEnv(ctx, A)) extends Trm(ctx, A)
+  case fun(using ctx: Ctx, A: Typ, B: Typ)
+          (typBody: Trm(consCtx(ctx, A), B))
+          extends Trm(ctx, lam(A, B))
+  case app(using ctx: Ctx, A: Typ, B: Typ)
+          (func: Trm(ctx, lam(A, B)), arg: Trm(ctx, A))
+          extends Trm(ctx, B)
+  case zero(using ctx: Ctx) extends Trm(ctx, nat)
+  case suc(using ctx: Ctx)(pred: Trm(ctx, nat)) extends Trm(ctx, nat)
+  case cs(using ctx: Ctx, A: Typ)
+         (n: Trm(ctx, nat), init: Trm(ctx, A), update: Trm(consCtx(ctx, nat), A))
+         extends Trm(ctx, A)
+  case rec(using ctx: Ctx, A: Typ)
+          (h0: Trm(consCtx(ctx, A), A))
+          extends Trm(ctx, A)
+
+def length(ctx: Ctx): Nat = ctx match
+  case emptyCtx => zero
+  case consCtx(ctx0, A) => suc(length(ctx0))
+
+def ext(using ctx1: Ctx, ctx2: Ctx)
+       (H: (A: Typ) ?-> (inenv: InEnv(ctx1, A)) -> InEnv(ctx2, A)):
+       (A: Typ) ?-> (B: Typ) ?-> (inenv: InEnv(consCtx(ctx1, B), A)) -> InEnv(consCtx(ctx2, B), A) =
+  A => B => inenv => {
+    inenv match
+      case here => here
+      case there(inenv0) => {
+        def inenv1 = H(inenv0)
+        there(inenv1)
+      }
+  }
+
+def subst(using ctx1: Ctx, ctx2: Ctx)
+         (H: (A: Typ) ?-> (inenv: InEnv(ctx1, A)) -> Trm(ctx2, A)):
+         (A: Typ) ?-> (trm: Trm(ctx1, A)) -> Trm(ctx2, A) = A => t => t match
+  case var(inenv) => H(inenv)
+  case fun(body) => fun(???)
 """
+
+  // case app(func, arg) => ???
+  // case zero => ???
+  // case suc(pred) => ???
+  // case cs(n, init, update) => ???
+  // case rec(t0) => ???
+
   runTypecheck(source1)
 }
