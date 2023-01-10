@@ -306,6 +306,7 @@ class Typer extends ConstraintSolving:
         // println(ctx.description(e => normalise(e).show))
         // println(s"---------------------")
         // println(ctx.constraint.show ++ "\n")
+        // println(s"!!!!!!!! normalising goal: $pt (${pt.show}) (hash=${ExprHasher.hash(pt)})")
         ctx.report(HoleInfo(ctx, normalise(pt)))
         Right(tpd.Wildcard().withType(pt))
     case e: Block => typedBlock(e, pt)
@@ -593,6 +594,7 @@ class Typer extends ConstraintSolving:
       case ddef: DataDef => typedDataDef(ddef) map { info => ctx.addDataInfo(info) }
       case ddef: DefDef => typedDefDef(ddef) map { info => ctx.addValInfo(info) }
       case p: Commands.Normalise => typed(p.expr) map { te =>
+        // println(s"asked to normalise ${te.show} (hash: ${ExprHasher.hash(normalise(te))})")
         println(Reducer.reduce(te).show)
       }
       case _ => assert(false, s"unsupported: $d")
