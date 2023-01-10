@@ -27,7 +27,7 @@ object Message:
         sb ++= "Goal\n"
         sb ++= "----\n"
         sb ++= "\n"
-        sb ++= s"  ${goal.show}\n"
+        sb ++= s"  ${Reducer.reduce(goal)(using context).show}\n"
         sb ++= s"\n"
         sb ++= s"Variables\n"
         sb ++= s"---------\n"
