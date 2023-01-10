@@ -32,6 +32,20 @@ case class EqConstraint(
 
   def reprOf(p: ParamSymbol): ParamSymbol = disjointSet.reprOf(p)
 
+  def equivalencesOf(e: Expr): List[Expr] =
+    val he = ExprHasher.hash(e)
+    @annotation.tailrec def recur(eqs: List[(Expr, Expr)], acc: List[Expr]): List[Expr] = eqs match
+      case Nil => acc
+      case (l, r) :: eqs =>
+        val hl = ExprHasher.hash(l)
+        val hr = ExprHasher.hash(r)
+        if hl == he then
+          recur(eqs, r :: acc)
+        else if hr == he then
+          recur(eqs, l :: acc)
+        else recur(eqs, acc)
+    recur(otherEq, Nil)
+
   def show: String =
     def paramEqs: List[String] =
       disjointSet.domain.flatMap { x =>

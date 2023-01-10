@@ -114,30 +114,44 @@ class Reducer(using Context) extends ExprMap:
   override def mapMatch(e: Match): Expr = {
     val scrut = this(e.scrutinee)
     popLastReduction()
-    if Reducer.isNeutralExpr(scrut) || scrut.isInstanceOf[PiElim] then
-      nonReduced(e)
-    else
-      scrut match
-        case AppliedDataCon(dconSym, args) =>
-          @annotation.tailrec def recur(cdefs: List[CaseDef]): Expr =
-            cdefs match
-              case Nil => assert(false)
-              case (binder @ CaseDef(pat, body)) :: cdefs =>
-                if pat.datacon.name == dconSym.name then
-                  val substitutor = new ExprMap:
-                    override def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
-                      if e.binder.exprId == binder.exprId then
-                        args(e.paramIdx)
-                      else
-                        super.mapPatternBoundParamRef(e)
-                  val body1 = substitutor(body)
-                  val body2 = checkReduction(this(body1))
-                  popLastReduction()
-                  reduced(body2)
-                else recur(cdefs)
-          recur(e.cases)
-        case _ =>
-          assert(false, scrut)
+
+    def findReducedEquivalent: Option[Expr] =
+      if Reducer.isNeutralExpr(scrut) || scrut.isInstanceOf[PiElim] then
+        val equivs = ctx.constraint.equivalencesOf(scrut)
+        @annotation.tailrec def recur(xs: List[Expr]): Option[Expr] =
+          xs match
+            case Nil => None
+            case x :: xs =>
+              if x.isInstanceOf[AppliedDataCon] then Some(x)
+              else recur(xs)
+        recur(equivs)
+      else Some(scrut)
+
+    findReducedEquivalent match
+      case None =>
+        nonReduced(e)
+      case Some(scrut) =>
+        scrut match
+          case AppliedDataCon(dconSym, args) =>
+            @annotation.tailrec def recur(cdefs: List[CaseDef]): Expr =
+              cdefs match
+                case Nil => assert(false)
+                case (binder @ CaseDef(pat, body)) :: cdefs =>
+                  if pat.datacon.name == dconSym.name then
+                    val substitutor = new ExprMap:
+                      override def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
+                        if e.binder.exprId == binder.exprId then
+                          args(e.paramIdx)
+                        else
+                          super.mapPatternBoundParamRef(e)
+                    val body1 = substitutor(body)
+                    val body2 = checkReduction(this(body1))
+                    popLastReduction()
+                    reduced(body2)
+                  else recur(cdefs)
+            recur(e.cases)
+          case _ =>
+            assert(false, scrut)
   }
 
   override def mapPatternBoundParamRef(e: PatternBoundParamRef): Expr =
